@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monopoly — Original Atlantic City Edition</title>
+<style>
+  :root{--ink:#1c241e;--paper:#f7f2df;--green:#12412f;--gold:#d9ab4a}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 50% 0,#214f3a,#0d2a1e 70%);color:#f4f1e6;font-family:Georgia,'Times New Roman',serif;min-height:100vh}
+  header{text-align:center;padding:18px 12px 8px}
+  header h1{margin:0;font-size:clamp(24px,4vw,38px);letter-spacing:.14em;color:var(--gold);text-transform:uppercase}
+  header p{margin:4px 0 0;font-size:13px;color:#b9d4c4;letter-spacing:.06em}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;max-width:1380px;margin:0 auto;padding:12px 16px 40px;align-items:start}
+  .board-wrap{background:#e8e1c8;padding:10px;border-radius:10px;box-shadow:0 18px 45px #0007,0 0 0 4px #0a2018}
+  .board{display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);width:100%;aspect-ratio:1;background:var(--paper);border:2px solid #2c3a2f;position:relative;overflow:hidden}
+  .tile{position:relative;background:#fbf8ea;border:.5px solid #0002;overflow:hidden;padding:3px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;color:var(--ink);font-family:Arial,Helvetica,sans-serif;line-height:1.05;min-width:0;min-height:0}
+  .tile.corner{background:#f0e9cf;justify-content:center;gap:3px}
+  .tile .bar{position:absolute;background:#888;z-index:0}
+  .bar-bottom .bar{bottom:0;left:0;right:0;height:22%}
+  .bar-top .bar{top:0;left:0;right:0;height:22%}
+  .bar-left .bar{left:0;top:0;bottom:0;width:22%}
+  .bar-right .bar{right:0;top:0;bottom:0;width:22%}
+  .tile .nm{position:relative;z-index:1;font-size:clamp(5px,.72vw,10px);font-weight:700;letter-spacing:-.02em;margin-bottom:2px;word-break:break-word}
+  .tile .pr,.tile .sub{position:relative;z-index:1;font-size:clamp(5px,.62vw,9px);color:#3d463d}
+  .tile .icon{font-size:clamp(12px,1.6vw,24px);line-height:1;z-index:1}
+  .tile .arrow{font-size:clamp(12px,1.6vw,22px);color:#b3372d;transform:rotate(90deg);z-index:1}
+  .tile.mortgaged{opacity:.55}
+  .tile.mortgaged::after{content:'MORTGAGED';position:absolute;inset:0;display:grid;place-items:center;font-size:7px;font-weight:800;color:#a22;background:#fff9;z-index:3}
+  .owner-dot{position:absolute;top:2px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;border:1px solid #0008;z-index:2}
+  .houses{position:absolute;bottom:2px;right:2px;display:flex;gap:1px;z-index:2}
+  .houses i{width:4px;height:7px;background:#2c8f4e;border:1px solid #14512a;display:block}
+  .houses i.hotel{background:#c0392b;border-color:#7d2018;width:6px;height:9px}
+  .tokens{position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:center;gap:0;z-index:4;pointer-events:none}
+  .tk{font-size:clamp(9px,1.25vw,17px);line-height:1;text-shadow:0 1px 2px #fff,0 0 3px #fff;filter:drop-shadow(0 1px 1px #0006)}
+  .center{grid-row:2/11;grid-column:2/11;background:#dcead6;border:3px double #8aa587;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:8px;position:relative}
+  .logo{font-size:clamp(18px,3vw,38px);font-weight:900;letter-spacing:.08em;color:#a93a2b;line-height:.95;text-shadow:1px 1px 0 #fff}
+  .logo small{display:block;font-size:clamp(6px,.8vw,11px);letter-spacing:.35em;color:#2f6349;margin-top:5px}
+  .msg{font-family:Arial,sans-serif;font-size:clamp(8px,1.05vw,14px);color:#244a37;min-height:2.4em;max-width:90%}
+  .dice{font-size:clamp(26px,4.5vw,58px);display:flex;gap:12px;line-height:1;color:#162a20}
+  .dice .rolling{animation:shake .12s infinite alternate}
+  @keyframes shake{from{transform:rotate(-12deg) scale(.94)}to{transform:rotate(12deg) scale(1.05)}}
+  .turn{font-family:Arial,sans-serif;font-size:clamp(8px,1vw,13px);font-weight:700;color:#173f2e}
+  .hint{font-family:Arial,sans-serif;font-size:clamp(7px,.9vw,11px);color:#4a6b57}
+  aside{display:flex;flex-direction:column;gap:12px}
+  .card{display:none;background:#f7f2df;color:var(--ink);border-radius:10px;padding:14px;box-shadow:0 8px 24px #0004;border:1px solid #cbbd91}
+  .card h2{margin:0 0 8px;font-size:19px;color:#1d4a35}
+  .card h3{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#6b5c35}
+  .card p{font-size:13px;line-height:1.45;margin:0 0 10px}
+  .opts{display:grid;gap:10px;margin:12px 0}
+  label{font-family:Arial,sans-serif;font-size:12px;display:grid;gap:4px}
+  select,input{font-family:Arial,sans-serif;font-size:13px;padding:7px;border:1px solid #b9ae89;border-radius:5px;background:#fffdf5;color:var(--ink);min-width:0}
+  .btns{display:flex;flex-wrap:wrap;gap:7px}
+  button{font-family:Arial,sans-serif;font-size:12px;font-weight:700;padding:9px 12px;border:1px solid #a99a71;border-radius:6px;background:#fffdf3;color:#23352a;cursor:pointer}
+  button:hover:not(:disabled){background:#e9e2c6}
+  button:disabled{opacity:.42;cursor:not-allowed}
+  button.primary{background:#1d6b47;border-color:#13482f;color:#fff}
+  button.primary:hover:not(:disabled){background:#238459}
+  #players{display:grid;gap:6px}
+  .p-row{display:flex;align-items:center;gap:8px;border:1px solid #d6cbab;border-radius:7px;padding:7px 8px;background:#fffdf4;font-family:Arial,sans-serif;font-size:12px}
+  .p-row.active{border-color:#1d6b47;background:#e6f3e7;box-shadow:0 0 0 1px #1d6b47 inset}
+  .p-row.bankrupt{opacity:.45;text-decoration:line-through}
+  .p-row .sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .p-row .nm{font-weight:700}
+  .p-row .meta{font-size:10px;color:#6a6f5f;display:block}
+  .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
+  #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
+  #log .hi{font-weight:700;color:#1c6746}
+  .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
+  .overlay.show{display:flex}
+  .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
+  .banner{font-size:19px;font-weight:800;color:#a93a2b;border-bottom:2px solid #d8c99a;padding-bottom:9px;margin-bottom:12px}
+  .dialog p{font-family:Arial,sans-serif;font-size:14px;line-height:1.5}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  #winner{text-align:center}
+  #winnerText{font-size:32px;color:var(--gold);margin:8px 0}
+  #winnerSub{font-family:Arial,sans-serif;font-size:14px;color:#d7e7db;margin-bottom:18px}
+  @media(max-width:950px){.layout{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}#log{max-height:160px}}
+  @media(max-width:480px){.tile .nm{font-size:5px}.tile .pr,.tile .sub{font-size:5px}.board-wrap{padding:5px}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Monopoly</h1>
+  <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
+</header>
+<div class="layout">
+  <div class="board-wrap"><div class="board" id="board"></div></div>
+  <aside>
+    <div class="card" id="setup" style="display:block"></div>
+    <div class="card" id="gameCards" style="display:none"><h3>Now playing</h3><div id="players"></div></div>
+    <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
+    <div class="card" id="logCard" style="display:none"><h3>Game log</h3><div id="log"></div></div>
+  </aside>
+</div>
+<div class="overlay" id="modal"></div>
+<div class="overlay" id="winner"><div class="dialog"><div class="banner">Game over</div><div id="winnerText"></div><div id="winnerSub"></div><div class="btns"><button class="primary" onclick="location.reload()">Play again</button></div></div></div>
+<script>
+const COL = {
+  brown:'#7a4a25', lightblue:'#a6dcef', pink:'#d661a6', orange:'#f4902c',
+  red:'#e03636', yellow:'#f2d02c', green:'#2fa85a', blue:'#3a5ec4'
+};
+const T = [
+  {name:'GO',short:'GO',type:'go'},
+  {name:'Mediterranean Avenue',short:'Mediterranean\nAve',type:'prop',price:60,group:'brown',rents:[2,10,30,90,160,250],house:50},
+  {name:'Community Chest',short:'Community\nChest',type:'chest'},
+  {name:'Baltic Avenue',short:'Baltic\nAve',type:'prop',price:60,group:'brown',rents:[4,20,60,180,320,450],house:50},
+  {name:'Income Tax',short:'Income Tax',type:'tax'},
+  {name:'Reading Railroad',short:'Reading\nRailroad',type:'rail',price:200},
+  {name:'Oriental Avenue',short:'Oriental\nAve',type:'prop',price:100,group:'lightblue',rents:[6,30,90,270,400,550],house:50},
+  {name:'Chance',short:'Chance',type:'chance'},
+  {name:'Vermont Avenue',short:'Vermont\nAve',type:'prop',price:100,group:'lightblue',rents:[6,30,90,270,400,550],house:50},
+  {name:'Connecticut Avenue',short:'Connecticut\nAve',type:'prop',price:120,group:'lightblue',rents:[8,40,100,300,450,600],house:50},
+  {name:'Jail / Just Visiting',short:'In Jail /\nJust Visiting',type:'jail'},
+  {name:'St. Charles Place',short:'St. Charles\nPlace',type:'prop',price:140,group:'pink',rents:[10,50,150,450,625,750],house:100},
+  {name:'Electric Company',short:'Electric\nCompany',type:'util',price:150},
+  {name:'States Avenue',short:'States\nAve',type:'prop',price:140,group:'pink',rents:[10,50,150,450,625,750],house:100},
+  {name:'Virginia Avenue',short:'Virginia\nAve',type:'prop',price:160,group:'pink',rents:[12,60,180,500,700,900],house:100},
+  {name:'Pennsylvania Railroad',short:'Pennsylvania\nRailroad',type:'rail',price:200},
+  {name:'St. James Place',short:'St. James\nPlace',type:'prop',price:180,group:'orange',rents:[14,70,200,550,750,950],house:100},
+  {name:'Community Chest',short:'Community\nChest',type:'chest'},
+  {name:'Tennessee Avenue',short:'Tennessee\nAve',type:'prop',price:180,group:'orange',rents:[14,70,200,550,750,950],house:100},
+  {name:'New York Avenue',short:'New York\nAve',type:'prop',price:200,group:'orange',rents:[16,80,220,600,800,1000],house:100},
+  {name:'Free Parking',short:'Free\nParking',type:'free'},
+  {name:'Kentucky Avenue',short:'Kentucky\nAve',type:'prop',price:220,group:'red',rents:[18,90,250,700,875,1050],house:150},
+  {name:'Chance',short:'Chance',type:'chance'},
+  {name:'Indiana Avenue',short:'Indiana\nAve',type:'prop',price:220,group:'red',rents:[18,90,250,700,875,1050],house:150},
+  {name:'Illinois Avenue',short:'Illinois\nAve',type:'prop',price:240,group:'red',rents:[20,100,300,750,925,1100],house:150},
+  {name:'B&O Railroad',short:'B & O\nRailroad',type:'rail',price:200},
+  {name:'Atlantic Avenue',short:'Atlantic\nAve',type:'prop',price:260,group:'yellow',rents:[22,110,330,800,975,1150],house:150},
+  {name:'Ventnor Avenue',short:'Ventnor\nAve',type:'prop',price:260,group:'yellow',rents:[22,110,330,800,975,1150],house:150},
+  {name:'Water Works',short:'Water\nWorks',type:'util',price:150},
+  {name:'Marvin Gardens',short:'Marvin\nGardens',type:'prop',price:280,group:'yellow',rents:[24,120,360,850,1025,1200],house:150},
+  {name:'Go To Jail',short:'GO TO\nJAIL',type:'gtj'},
+  {name:'Pacific Avenue',short:'Pacific\nAve',type:'prop',price:300,group:'green',rents:[26,130,390,900,1100,1275],house:200},
+  {name:'North Carolina Avenue',short:'N. Carolina\nAve',type:'prop',price:300,group:'green',rents:[26,130,390,900,1100,1275],house:200},
+  {name:'Community Chest',short:'Community\nChest',type:'chest'},
+  {name:'Pennsylvania Avenue',short:'Pennsylvania\nAve',type:'prop',price:320,group:'green',rents:[28,150,450,1000,1200,1400],house:200},
+  {name:'Short Line',short:'Short\nLine',type:'rail',price:200},
+  {name:'Chance',short:'Chance',type:'chance'},
+  {name:'Park Place',short:'Park\nPlace',type:'prop',price:350,group:'blue',rents:[35,175,500,1100,1300,1500],house:200},
+  {name:'Luxury Tax',short:'Luxury Tax\n$75',type:'tax'},
+  {name:'Boardwalk',short:'Boardwalk',type:'prop',price:400,group:'blue',rents:[50,200,600,1400,1700,2000],house:200}
+];
+const TOKENS = ['🚢','💣','🚗','🐕','🎩','⚙️','👟','🧷'];
+const PCOL = ['#e04b4b','#4b8ce0','#e0b54b','#b96ee0','#4ed0a0','#e8834b','#e0e0e0','#8be04b'];
+const CHANCE = [
+  {t:'Advance to Boardwalk.',a:'goto',to:39},
+  {t:'Advance to GO. Collect $200.',a:'goto',to:0},
+  {t:'Advance to Illinois Avenue. If you pass GO, collect $200.',a:'goto',to:24},
+  {t:'Advance to St. Charles Place. If you pass GO, collect $200.',a:'goto',to:11},
+  {t:'Advance to the nearest Railroad. If unowned, you may buy it from the Bank. If owned, pay the owner twice the usual rent.',a:'nearrail'},
+  {t:'Advance to the nearest Railroad. If unowned, you may buy it from the Bank. If owned, pay the owner twice the usual rent.',a:'nearrail'},
+  {t:'Advance to the nearest Utility. If unowned, you may buy it from the Bank. If owned, pay ten times the dice total.',a:'nearutil'},
+  {t:'Bank pays you a dividend of $50.',a:'get',v:50},
+  {t:'Get Out of Jail Free. This card may be kept until needed or sold.',a:'jailcard'},
+  {t:'Go back three spaces.',a:'back3'},
+  {t:'GO TO JAIL. Go directly to jail. Do not pass GO. Do not collect $200.',a:'jail'},
+  {t:'Make general repairs on all your property: $25 per house, $100 per hotel.',a:'repairs',h:25,hot:100},
+  {t:'Speeding fine — pay $15.',a:'paybank',v:15},
+  {t:'Take a trip to Reading Railroad. If you pass GO, collect $200.',a:'goto',to:5},
+  {t:'You have been elected Chairman of the Board. Pay each player $50.',a:'payeach',v:50},
+  {t:'Your building loan matures. Collect $150.',a:'get',v:150}
+];
+const CHEST = [
+  {t:'Advance to GO. Collect $200.',a:'goto',to:0},
+  {t:'Bank error in your favour. Collect $200.',a:'get',v:200},
+  {t:"Doctor's fee. Pay $50.",a:'paybank',v:50},
+  {t:'From the sale of stock you get $50.',a:'get',v:50},
+  {t:'Get Out of Jail Free. This card may be kept until needed or sold.',a:'jailcard'},
+  {t:'GO TO JAIL. Go directly to jail. Do not pass GO. Do not collect $200.',a:'jail'},
+  {t:'Holiday fund matures. Receive $100.',a:'get',v:100},
+  {t:'Income tax refund. Collect $20.',a:'get',v:20},
+  {t:'It is your birthday. Collect $10 from every player.',a:'geteach',v:10},
+  {t:'Life insurance matures. Collect $100.',a:'get',v:100},
+  {t:'Pay hospital fees of $100.',a:'paybank',v:100},
+  {t:'Pay school fees of $50.',a:'paybank',v:50},
+  {t:'Receive $25 consultancy fee.',a:'get',v:25},
+  {t:'You are assessed for street repairs: $40 per house, $115 per hotel.',a:'repairs',h:40,hot:115},
+  {t:'You have won second prize in a beauty contest. Collect $10.',a:'get',v:10},
+  {t:'You inherit $100.',a:'get',v:100}
+];
+
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let S = null;
+let diceTotal = 7;
+
+function log(msg, hi){
+  S.log.push({msg,hi});
+  if(S.log.length>120) S.log.shift();
+  const el=$('#log');
+  el.innerHTML=S.log.slice(-40).map(x=>`<div class="${x.hi?'hi':''}">${x.msg}</div>`).join('');
+  el.scrollTop=el.scrollHeight;
+}
+function money(n){return '$'+n.toLocaleString('en-US')}function saleValue(i){return S.props[i].level===5?2*T[i].house:Math.floor(T[i].house/2)}
+function posName(i){return T[i].name}
+function activePlayers(){return S.players.filter(p=>!p.bankrupt)}
+
+function buildBoard(){
+  const board=$('#board');
+  board.innerHTML='';
+  T.forEach((t,i)=>{
+    const d=document.createElement('div');
+    d.className='tile';
+    d.dataset.i=i;
+    let r,c,bar;
+    if(i===0){r=11;c=11;bar='bottom'}
+    else if(i<11){r=11;c=11-i;bar='bottom'}
+    else if(i<21){r=21-i;c=1;bar='left'}
+    else if(i<31){r=1;c=i-19;bar='top'}
+    else {r=i-29;c=11;bar='right'}
+    d.style.gridRow=r;d.style.gridColumn=c;
+    if(['go','jail','free','gtj'].includes(t.type)) d.classList.add('corner');
+    if(['prop','rail','util'].includes(t.type)){
+      d.classList.add('bar-'+bar);
+      const col=t.group?COL[t.group]:(t.type==='rail'?'#333':'#7d9fb8');
+      d.innerHTML=`<div class="bar" style="background:${col}"></div><div class="nm">${t.short.replace('\n','<br>')}</div><div class="pr">${t.price?money(t.price):''}</div>`;
+    } else if(t.type==='chest'||t.type==='chance'){
+      d.innerHTML=`<div class="icon">${t.type==='chest'?'🧰':'❓'}</div><div class="nm">${t.short.replace('\n','<br>')}</div>`;
+    } else if(t.type==='tax'){
+      d.innerHTML=`<div class="nm">${t.short.replace('\n','<br>')}</div><div class="sub">${i===4?'10% or $200':'Pay $75'}</div>`;
+    } else {
+      d.innerHTML=`<div class="nm">${t.short.replace('\n','<br>')}</div>${i===0?'<div class="arrow">➜</div>':''}${i===10?'<div class="icon">👮</div>':''}${i===30?'<div class="icon">🚔</div>':''}${i===20?'<div class="icon">🅿️</div>':''}`;
+    }
+    const tok=document.createElement('div');tok.className='tokens';d.appendChild(tok);
+    board.appendChild(d);
+  });
+  const c=document.createElement('div');
+  c.className='center';
+  c.innerHTML=`<div class="logo">MONOPOLY<small>ATLANTIC CITY</small></div><div class="msg" id="centerMsg">Roll the dice to begin</div><div class="dice" id="dice"><span>⚀</span><span>⚀</span></div><div class="turn" id="centerTurn"></div><div class="hint" id="hint"></div>`;
+  board.appendChild(c);
+}
+function renderBoard(){
+  document.querySelectorAll('.tile').forEach(d=>{
+    const i=+d.dataset.i, t=T[i], prop=S.props[i];
+    const old=d.querySelector('.houses'); if(old) old.remove();
+    const dot=d.querySelector('.owner-dot'); if(dot) dot.remove();
+    d.classList.toggle('mortgaged',!!prop.mortgaged);
+    if(prop.owner!==null && prop.owner!==undefined){
+      const o=document.createElement('div');o.className='owner-dot';
+      o.style.background=PCOL[prop.owner];d.appendChild(o);
+    }
+    if(prop.level>0){
+      const h=document.createElement('div');h.className='houses';
+      const n=prop.level===5?1:prop.level;
+      for(let k=0;k<n;k++){const e=document.createElement('div');e.className='house'+(prop.level===5?' hotel':'');h.appendChild(e)}
+      d.appendChild(h);
+    } else if(['prop','rail','util'].includes(t.type) && prop.owner!==null && prop.owner!==undefined){
+      const h=document.createElement('div');h.className='houses';
+      const e=document.createElement('div');e.className='house';e.style.background=PCOL[prop.owner];e.style.borderColor='#0008';e.title='owned';h.appendChild(e);d.appendChild(h);
+    }
+  });
+  renderTokens();
+}
+function renderTokens(){
+  document.querySelectorAll('.tile .tokens').forEach(e=>e.innerHTML='');
+  S.players.forEach(p=>{
+    if(p.bankrupt) return;
+    const tile=document.querySelector(`.tile[data-i="${p.pos}"] .tokens`);
+    if(!tile) return;
+    const s=document.createElement('span');s.className='tok';s.textContent=TOKENS[p.id];
+    s.style.filter=`drop-shadow(0 0 2px ${PCOL[p.id]}) drop-shadow(0 1px 1px #0008)`;
+    tile.appendChild(s);
+  });
+}
+function renderPlayers(){
+  $('#players').innerHTML=S.players.map(p=>{
+    const n=activePlayers().filter(o=>o.props().length).length;
+    return `<div class="p-row ${p.id===S.current?'active':''} ${p.bankrupt?'bankrupt':''}">
+      <span class="tk">${TOKENS[p.id]}</span>
+      <span class="info"><span class="nm">${p.name}${p.type==='ai'?' <span style="font-size:10px;color:#9fb0a1">(CPU)</span>':''}</span>
+      <span class="meta">${posName(p.pos)}${p.jailed?' · in jail':''} · ${p.props().length} properties${p.cards.cc+p.cards.chance?' · '+JAILFREE(p)+' out':''}</span></span>
+      <span class="cash">${p.bankrupt?'—':money(p.cash)}</span></div>`;
+  }).join('');
+}
+function JAILFREE(p){return p.cards.cc+p.cards.chance}
+function renderControls(hint){
+  $('#centerTurn').textContent=S.players[S.current].name+"'s turn";
+  if(hint!==undefined) $('#hint').textContent=hint;
+}
+function setMsg(s){const e=$('#centerMsg');if(e)e.textContent=s}
+function showDice(a,b){const d=$('#dice');if(!d)return;const faces=['⚀','⚁','⚂','⚃','⚄','⚅'];d.innerHTML=`<span class="${a?'':'rolling'}">${faces[a-1]||'⚀'}</span><span class="${b?'':'rolling'}">${faces[b-1]||'⚀'}</span>`}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+function setup(){
+  $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth.</p>
+  <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+  <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label></div>
+  <button class="primary" id="startBtn">Start game</button>`;
+  $('#startBtn').onclick=()=>{
+    const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
+    newGame(n,h);
+  };
+  $('#helpBtn').onclick=()=>message('Classic rules',`Roll two dice and move. Doubles earn another roll; three doubles in a row sends you to Jail. Buy unowned property or send it to auction. Rent is doubled on an unimproved property when its owner holds the whole colour group. Railways rent $25/$50/$100/$200 by how many you own; utilities charge 4× or 10× the dice. Build houses only with a complete colour group, evenly across the group. Free Parking pays nothing; taxes go to the Bank. Pass GO for $200. Bankruptcy transfers everything to your creditor; last player standing wins.`);
+}
+function newGame(n,h){
+  S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,
+     chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()])};
+  const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
+  for(let i=0;i<n;i++){
+    const p={
+      id:i,name:i<h?`Player ${i+1}`:names[i%names.length],type:i<h?'human':'ai',token:TOKENS[i],
+      cash:1500,pos:0,jailed:false,jailTurns:0,cards:{cc:0,chance:0},bankrupt:false,
+      props(){return Object.keys(S.props).map(Number).filter(k=>S.props[k].owner===this.id)}
+    };
+    S.players.push(p);
+  }
+  $('#setup').style.display='none';
+  ['#gameCards','#playersCard','#logCard'].forEach(s=>$(s).style.display='block');
+  buildBoard();renderBoard();renderPlayers();renderControls('Waiting for roll');
+  log('Game started — '+n+' players, '+h+' human.',true);
+  setMsg('Let the games begin!');
+  setTimeout(playTurn,600);
+}
+function nextPlayer(){
+  if(S.gameover)return;
+  let i=S.current;
+  do{i=(i+1)%S.players.length}while(S.players[i].bankrupt&&i!==S.current);
+  S.current=i;renderPlayers();renderControls(`${S.players[i].name}'s turn — roll when ready`);
+  setTimeout(playTurn,500);
+}
+
+function ask({title,msg,buttons}){
+  return new Promise(resolve=>{
+    const m=$('#modal');
+    m.classList.add('show');
+    const render=()=>{
+      m.innerHTML=`<div class="dialog"><div class="banner">${title}</div><p>${msg}</p><div class="btns">${buttons.map((b,i)=>`<button class="${b.cls||''}" data-i="${i}" ${b.disabled?'disabled':''}>${b.label}</button>`).join('')}</div></div>`;
+      m.querySelectorAll('button[data-i]').forEach(btn=>btn.onclick=()=>{m.classList.remove('show');m.innerHTML='';resolve(buttons[+btn.dataset.i].value)});
+    };
+    render();
+  });
+}
+function message(title,msg){
+  return ask({title,msg,buttons:[{label:'OK',value:'ok',cls:'primary'}]});
+}
+async function rollFor(p){
+  if(p.type==='human') await ask({title:`${p.name} — roll the dice`,msg:'Click to roll. Doubles earn another roll; three doubles in a row sends you straight to Jail.',buttons:[{label:'🎲 Roll dice',value:'roll',cls:'primary'}]});
+  else await sleep(700);
+  const a=1+Math.floor(Math.random()*6),b=1+Math.floor(Math.random()*6);
+  showDice(a,b);diceTotal=a+b;
+  setMsg(`${p.name} rolled ${a} + ${b} = ${diceTotal}`);
+  await sleep(420);
+  return [a,b];
+}
+async function moveSteps(p,steps){
+  for(let k=0;k<steps;k++){
+    if(p.pos===39){p.cash+=200;log(`${p.name} passes GO and collects $200.`,true);}
+    p.pos=(p.pos+1)%40;renderTokens();renderPlayers();
+    if(k<steps-1) await sleep(115);
+  }
+  renderPlayers();
+}
+async function goto(p,dest,collect=true){
+  if(collect&&dest<p.pos){p.cash+=200;log(`${p.name} passes GO and collects $200.`,true)}
+  p.pos=dest;renderTokens();renderPlayers();await sleep(220);
+}
+function ownsGroup(p,g){return T.every((t,i)=>t.group!==g||S.props[i].owner===p.id)}
+function railCount(p){return [5,15,25,35].filter(i=>S.props[i].owner===p.id).length}
+function utilCount(p){return [12,28].filter(i=>S.props[i].owner===p.id).length}
+function rentDue(i,payer){
+  const t=T[i],pr=S.props[i],owner=S.players[pr.owner];
+  if(pr.mortgaged||!owner||owner===payer)return 0;
+  if(t.type==='rail')return [0,25,50,100,200][railCount(owner)];
+  if(t.type==='util')return diceTotal*(utilCount(owner)===2?10:4);
+  let r=t.rents[pr.level];
+  if(pr.level===0&&ownsGroup(owner,t.group))r*=2;
+  return r;
+}
+function boardValue(p){return p.props().reduce((s,i)=>s+T[i].price+S.props[i].level*T[i].house,0)}
+
+async function raiseCash(p,need){
+  while(p.cash<need&&!p.bankrupt){
+    const opts=[];
+    p.props().forEach(i=>{
+      const pr=S.props[i];
+      if(pr.level>0)opts.push({label:`Sell a house on ${T[i].name} (+${money(saleValue(i))})`,value:{k:'sell',i}});
+      else if(!pr.mortgaged)opts.push({label:`Mortgage ${T[i].name} (+${money(Math.floor(T[i].price/2))})`,value:{k:'mort',i}});
+    });
+    if(!opts.length)return false;
+    let choice;
+    if(p.type==='human') choice=await ask({title:'You need '+money(need-p.cash)+' more',msg:'Raise cash by selling houses or mortgaging property, otherwise you go bankrupt.',buttons:[...opts.map(o=>({label:o.label,value:o.value})),{label:'I cannot pay — declare bankruptcy',value:{k:'bank'},cls:'danger'}]});
+    else choice=opts[0].value;
+    if(choice.k==='bank')return false;
+    if(choice.k==='sell'){
+      const pr=S.props[choice.i];pr.level--;p.cash+=saleValue(choice.i);
+      log(`${p.name} sells a house on ${T[choice.i].name}.`);
+    } else {
+      const pr=S.props[choice.i];pr.mortgaged=true;p.cash+=Math.floor(T[choice.i].price/2);
+      log(`${p.name} mortgages ${T[choice.i].name}.`);
+    }
+    renderBoard();renderPlayers();
+  }
+  return p.cash>=need;
+}
+async function charge(p,amount,creditor,reason){
+  if(amount<=0)return true;
+  if(p.cash<amount){
+    const ok=await raiseCash(p,amount);
+    if(!ok){declareBankrupt(p,creditor||null);return false}
+  }
+  p.cash-=amount;
+  if(creditor)creditor.cash+=amount;
+  log(`${p.name} pays ${money(amount)} ${reason}${creditor?' to '+creditor.name:''}.`);
+  renderPlayers();return true;
+}
+function declareBankrupt(p,creditor){
+  p.bankrupt=true;p.cash=0;
+  p.props().forEach(i=>{
+    const pr=S.props[i];
+    if(creditor){pr.owner=creditor.id;creditor.cards.cc+=p.cards.cc;creditor.cards.chance+=p.cards.chance}
+    else {pr.owner=null;pr.level=0;pr.mortgaged=false}
+  });
+  p.cards={cc:0,chance:0};
+  log(`${p.name} is bankrupt!`,true);
+  renderBoard();renderPlayers();
+  const left=activePlayers();
+  if(left.length===1){
+    S.gameover=true;
+    const w=left[0];
+    $('#winnerText').textContent=w.name+' wins!';
+    $('#winnerSub').textContent=`${w.name} ends with ${money(w.cash)} in cash and ${w.props().length} properties.`;
+    $('#winner').classList.add('show');
+    log(`${w.name} wins the game!`,true);
+  }
+}
+async function offerBuy(p,i){
+  const t=T[i],price=t.price;
+  let buy;
+  if(p.type==='human') buy=(await ask({title:'Unowned property',msg:`${t.name} is for sale at ${money(price)}. Your cash: ${money(p.cash)}. If you decline it goes to auction.`,buttons:[
+    {label:`Buy for ${money(price)}`,value:true,cls:'primary'},{label:'Auction it',value:false}]}))===true;
+  else buy=p.cash>=price+Math.min(180,price*.25) && (p.props().length<3||Math.random()<.72);
+  if(buy){
+    if(p.cash<price){const ok=await raiseCash(p,price);if(!ok){declareBankrupt(p,null);return}}
+    p.cash-=price;S.props[i].owner=p.id;
+    log(`${p.name} buys ${t.name} for ${money(price)}.`,true);
+    renderBoard();renderPlayers();
+  } else await auction(p,i);
+}
+async function auction(starter,i){
+  const t=T[i];
+  log(`${t.name} goes to auction.`);
+  let high=0,winner=null;
+  const order=S.players.map((_,k)=>(S.current+k)%S.players.length).filter(id=>!S.players[id].bankrupt);
+  let active=order.slice();
+  let round=0;
+  while(active.length>1&&round<20){
+    round++;
+    for(const id of [...active]){
+      const p=S.players[id];
+      if(p.bankrupt){active=active.filter(x=>x!==id);continue}
+      const min=high+10;
+      let bid;
+      if(p.type==='human') bid=await ask({title:'Auction — '+t.name,msg:`Current bid: ${money(high)} by ${winner?winner.name:'no one'}. Your cash: ${money(p.cash)}.`,buttons:[
+        {label:`Bid ${money(min)}`,value:min,cls:'primary',disabled:min>p.cash},{label:'Pass',value:0}]});
+      else {
+        const cap=Math.min(p.cash,Math.floor(t.price*(t.group?1.25:1.1)));
+        bid=min<=cap&&Math.random()<.75?min:0;
+      }
+      if(bid>high){high=bid;winner=p}else{active=active.filter(x=>x!==id)}
+    }
+  }
+  if(winner&&high>0){
+    winner.cash-=high;S.props[i].owner=winner.id;
+    log(`${winner.name} wins ${t.name} at auction for ${money(high)}.`,true);
+    renderBoard();renderPlayers();
+  } else log(`Nobody bid on ${t.name}.`);
+}
+async function land(p){
+  const i=p.pos,t=T[i],pr=S.props[i];
+  setMsg(`${p.name} lands on ${t.name}`);
+  if(t.type==='go'||t.type==='free'||t.type==='jail')return;
+  if(t.type==='gtj'){goToJail(p);return}
+  if(['prop','rail','util'].includes(t.type)){
+    if(pr.owner===null){
+      if(p.type==='human') await offerBuy(p,i);
+      else {
+        const price=t.price;
+        if(p.cash>=price+80&&(railCount(p)<4||utilCount(p)<2||Math.random()<.6)){
+          p.cash-=price;pr.owner=p.id;log(`${p.name} buys ${t.name} for ${money(price)}.`,true);renderBoard();renderPlayers();
+        } else await auction(p,i);
+      }
+    } else if(pr.owner!==p.id){
+      const r=rentDue(i,p);
+      const owner=S.players[pr.owner];
+      setMsg(`${p.name} owes ${money(r)} rent to ${owner.name}`);
+      await sleep(350);
+      await charge(p,r,owner,`rent on ${t.name}`);
+    } else setMsg(`${p.name} owns ${t.name}`);
+    return;
+  }
+  if(t.type==='tax'){
+    let amt=75;
+    if(i===4){
+      const worth=p.cash+boardValue(p);
+      if(p.type==='human'){
+        const c=await ask({title:'Income Tax',msg:`Your total worth is ${money(worth)}. Pay $200 flat or 10% (${money(Math.ceil(worth*.1))}).`,buttons:[
+          {label:'Pay $200',value:200,cls:'primary'},{label:`Pay 10% — ${money(Math.ceil(worth*.1))}`,value:Math.ceil(worth*.1)}]});
+        amt=c;
+      } else amt=Math.min(200,Math.ceil(worth*.1));
+    }
+    await charge(p,amt,null,i===4?'income tax':'luxury tax');
+    return;
+  }
+  if(t.type==='chance'||t.type==='chest'){
+    const deck=t.type==='chance'?S.chance:S.chest;
+    const cards=t.type==='chance'?CHANCE:CHEST;
+    const id=deck.shift();deck.push(id);
+    const card=cards[id];
+    log(`${p.name} draws ${t.type==='chance'?'Chance':'Community Chest'}: ${card.t}`,true);
+    await message(t.type==='chance'?'Chance':'Community Chest',card.t);
+    await applyCard(p,card,t.type);
+  }
+}
+async function applyCard(p,card,deck){
+  switch(card.a){
+    case 'goto': await goto(p,card.to,true); await land(p); break;
+    case 'nearrail': {
+      const dest=[5,15,25,35].find(i=>i>p.pos)??5;
+      await goto(p,dest,true);
+      const pr=S.props[dest];
+      if(pr.owner===null) await offerBuy(p,dest);
+      else if(pr.owner!==p.id) await charge(p,rentDue(dest,p)*2,S.players[pr.owner],'double railroad rent');
+      break;
+    }
+    case 'nearutil': {
+      const dest=[12,28].find(i=>i>p.pos)??12;
+      await goto(p,dest,true);
+      const pr=S.props[dest];
+      if(pr.owner===null) await offerBuy(p,dest);
+      else if(pr.owner!==p.id) await charge(p,diceTotal*10,S.players[pr.owner],'utility rent');
+      break;
+    }
+    case 'back3': {const dest=Math.max(0,p.pos-3);await goto(p,dest,false);await land(p);break}
+    case 'jail': goToJail(p);break;
+    case 'jailcard': p.cards[deck==='chest'?'cc':'chance']++;renderPlayers();break;
+    case 'repairs': {
+      let amt=0;
+      p.props().forEach(i=>{const l=S.props[i].level;if(l===5)amt+=card.hot;else amt+=l*card.h});
+      if(amt) await charge(p,amt,null,'property repairs');
+      break;
+    }
+    case 'paybank': await charge(p,card.v,null,'a fine');break;
+    case 'get': p.cash+=card.v;log(`${p.name} collects ${money(card.v)}.`);renderPlayers();break;
+    case 'payeach': for(const o of activePlayers())if(o!==p){if(!await charge(p,card.v,o,'to '+o.name))break}break;
+    case 'geteach': for(const o of activePlayers())if(o!==p){await charge(o,card.v,p,'to '+p.name)}break;
+  }
+}
+function goToJail(p){
+  p.pos=10;p.jailed=true;p.jailTurns=0;renderTokens();renderPlayers();
+  log(`${p.name} goes to jail. Do not pass GO. Do not collect $200.`,true);
+  setMsg(`${p.name} is in jail`);
+}
+function useJailCard(p){
+  const deck=p.cards.cc>0?'cc':'chance';
+  p.cards[deck]--;
+  (deck==='cc'?S.chest:S.chance).push(deck==='cc'?CHEST.findIndex(c=>c.a==='jailcard'):CHANCE.findIndex(c=>c.a==='jailcard'));
+  p.jailed=false;renderPlayers();
+  log(`${p.name} uses a Get Out of Jail Free card.`);
+}
+async function handleJail(p){
+  let pay=false,useCard=false;
+  if(p.type==='human'){
+    const has=p.cards.cc+p.cards.chance>0;
+    const buttons=[];
+    if(has)buttons.push({label:'Use Get Out of Jail Free',value:'card',cls:'primary'});
+    buttons.push({label:'Pay $50 and roll',value:'pay',cls:has?'':'primary'},{label:'Roll for doubles',value:'roll'});
+    const c=await ask({title:`${p.name} is in jail`,msg:`Turn ${p.jailTurns+1} of 3. Pay $50, roll for doubles, or use a card.`,buttons});
+    pay=c==='pay';useCard=c==='card';
+  } else {
+    useCard=p.cards.cc+p.cards.chance>0&&p.jailTurns<2;
+    pay=!useCard&&(p.jailTurns>=2||p.cash>200);
+  }
+  if(useCard)useJailCard(p);
+  if(p.jailed&&pay){
+    if(await charge(p,50,null,'a $50 jail fee')){
+      p.jailed=false;renderPlayers();log(`${p.name} pays $50 to leave jail.`);
+    }
+  }
+  if(!p.jailed&&!p.bankrupt){
+    const [a,b]=await rollFor(p);
+    diceTotal=a+b;showDice(a,b);
+    await moveSteps(p,a+b);
+    return true;
+  }
+  const [a,b]=await rollFor(p);
+  diceTotal=a+b;showDice(a,b);
+  if(a===b){p.jailed=false;p.jailTurns=0;log(`${p.name} rolls doubles and leaves jail!`,true);await moveSteps(p,a+b);return true}
+  p.jailTurns++;
+  log(`${p.name} fails to roll doubles (${p.jailTurns}/3).`);
+  if(p.jailTurns>=3&&!p.bankrupt){
+    if(await charge(p,50,null,'a jail fine')){
+      p.jailed=false;p.jailTurns=0;
+      log(`${p.name} pays $50 after three turns in jail.`);
+      await moveSteps(p,a+b);
+      return true;
+    }
+  }
+  return false;
+}
+async function manage(p){
+  if(p.type==='human') await manageModal(p);
+  else aiBuild(p);
+}
+function canBuild(p,i){
+  const t=T[i],pr=S.props[i];
+  if(t.type!=='prop'||pr.owner!==p.id||pr.mortgaged||pr.level>=5)return false;
+  if(!ownsGroup(p,t.group))return false;
+  const min=Math.min(...T.map((x,j)=>x.group===t.group&&S.props[j].owner===p.id?S.props[j].level:99));
+  return pr.level<=min;
+}
+function aiBuild(p){
+  let guard=0;
+  while(guard++<20){
+    const options=p.props().filter(i=>canBuild(p,i)&&p.cash>=T[i].house+250);
+    if(!options.length)break;
+    options.sort((a,b)=>T[b].rents[1]-T[a].rents[1]);
+    const i=options[0],pr=S.props[i];
+    if(Math.random()>.78)break;
+    p.cash-=T[i].house;pr.level++;log(`${p.name} builds ${pr.level===5?'a hotel on':'a house on'} ${T[i].name}.`);renderBoard();renderPlayers();
+  }
+}
+function manageModal(p){
+  return new Promise(resolve=>{
+    const m=$('#modal');m.classList.add('show');
+    const draw=()=>{
+      const owned=p.props();
+      const buildOpts=owned.filter(i=>canBuild(p,i));
+      const sellOpts=owned.filter(i=>S.props[i].level>0);
+      const mortOpts=owned.filter(i=>S.props[i].level===0&&!S.props[i].mortgaged);
+      const unmortOpts=owned.filter(i=>S.props[i].mortgaged&&p.cash>=Math.ceil(T[i].price/2*1.1));
+      const opt=(list)=>list.length?list.map(i=>`<option value="${i}">${T[i].name}</option>`).join(''):'<option value="">— none available —</option>';
+      m.innerHTML=`<div class="dialog"><div class="banner">${p.name} — manage your turn</div>
+      <p>Cash: <b>${money(p.cash)}</b> · Properties: ${owned.length}</p>
+      <div class="grid2">
+      <label>Build a house or hotel<select id="buildSel">${opt(buildOpts)}</select></label>
+      <label>Sell a house<select id="sellSel">${opt(sellOpts)}</select></label>
+      <label>Mortgage a property<select id="mortSel">${opt(mortOpts)}</select></label>
+      <label>Unmortgage a property<select id="unmortSel">${opt(unmortOpts)}</select></label>
+      </div>
+      <div class="btns">
+      <button data-a="build" ${buildOpts.length?'':'disabled'}>Build (${buildOpts.length?money(T[buildOpts[0]].house):'—'})</button>
+      <button data-a="sell" ${sellOpts.length?'':'disabled'}>Sell house</button>
+      <button data-a="mort" ${mortOpts.length?'':'disabled'}>Mortgage</button>
+      <button data-a="unmort" ${unmortOpts.length?'':'disabled'}>Unmortgage</button>
+      <button data-a="trade">Trade…</button>
+      <button class="primary" data-a="done">End turn ✔</button>
+      </div></div>`;
+      m.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
+        const a=b.dataset.a;
+        const val=id=>+(m.querySelector(id)||{}).value||0;
+        if(a==='build'){const i=val('#buildSel');if(i){const c=T[i].house;if(p.cash>=c){p.cash-=c;S.props[i].level++;log(`${p.name} builds on ${T[i].name}.`);renderBoard();renderPlayers()}}}
+        if(a==='sell'){const i=val('#sellSel');if(i){S.props[i].level--;p.cash+=saleValue(i);log(`${p.name} sells a house on ${T[i].name}.`);renderBoard();renderPlayers()}}
+        if(a==='mort'){const i=val('#mortSel');if(i){S.props[i].mortgaged=true;p.cash+=Math.floor(T[i].price/2);log(`${p.name} mortgages ${T[i].name}.`);renderBoard();renderPlayers()}}
+        if(a==='unmort'){const i=val('#unmortSel');if(i){const c=Math.ceil(T[i].price/2*1.1);if(p.cash>=c){p.cash-=c;S.props[i].mortgaged=false;log(`${p.name} unmortgages ${T[i].name}.`);renderBoard();renderPlayers()}}}
+        if(a==='trade'){await tradeModal(p)}
+        if(a==='done'){m.classList.remove('show');m.innerHTML='';resolve();return}
+        draw();
+      });
+    };
+    draw();
+  });
+}
+function tradeModal(p){
+  return new Promise(resolve=>{
+    const m=$('#modal');m.classList.add('show');
+    const others=activePlayers().filter(o=>o!==p);
+    const draw=()=>{
+      if(!others.length){resolve();return}
+      const props=i=>i.props().map(k=>`<option value="${k}">${T[k].name}${S.props[k].level?' ('+S.props[k].level+' houses)':''}</option>`).join('');
+      const who=+(m.querySelector('#who')?.value??others[0].id);
+      const other=S.players[who]||others[0];
+      m.innerHTML=`<div class="dialog"><div class="banner">Propose a trade</div>
+      <p>Offer ${other.name} a deal. They will accept if it is fair to them.</p>
+      <div class="grid2">
+      <label>Trade with<select id="who">${others.map(o=>`<option value="${o.id}" ${o===other?'selected':''}>${o.name}</option>`).join('')}</select></label>
+      <label></label>
+      <label>You give property<select id="giveProp"><option value="">— none —</option>${props(p)}</select></label>
+      <label>You give cash<input id="giveCash" type="number" min="0" max="${p.cash}" value="0"></label>
+      <label>You receive property<select id="getProp"><option value="">— none —</option>${props(other)}</select></label>
+      <label>You receive cash<input id="getCash" type="number" min="0" max="${other.cash}" value="0"></label>
+      </div><div class="btns"><button data-a="send" class="primary">Send offer</button><button data-a="cancel">Cancel</button></div></div>`;
+      m.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
+        if(b.dataset.a==='cancel'){m.classList.remove('show');m.innerHTML='';resolve();return}
+        const giveP=+(m.querySelector('#giveProp').value||0), getP=+(m.querySelector('#getProp').value||0);
+        const giveC=Math.max(0,Math.min(p.cash,+(m.querySelector('#giveCash').value||0)));
+        const getC=Math.max(0,Math.min(other.cash,+(m.querySelector('#getCash').value||0)));
+        const v=(i,o)=>i?T[i].price+S.props[i].level*T[i].house:0;
+        const giveVal=v(giveP,p)+giveC, getVal=v(getP,other)+getC;
+        let accepted=true;
+        if(other.type==='ai') accepted=getVal>=giveVal*.92 && other.cash>=getC && p.cash>=giveC;
+        else accepted=await ask({title:`Trade from ${p.name}`,msg:`Offers ${giveP?T[giveP].name:'nothing'} + ${money(giveC)} for ${getP?T[getP].name:'nothing'} + ${money(getC)}. Accept?`,buttons:[{label:'Accept',value:true,cls:'primary'},{label:'Decline',value:false}]});
+        if(accepted){
+          if(giveP)S.props[giveP].owner=other.id;
+          if(getP)S.props[getP].owner=p.id;
+          p.cash+=getC-giveC;other.cash+=giveC-getC;
+          log(`${p.name} and ${other.name} complete a trade.`,true);
+          renderBoard();renderPlayers();
+          if(other.type==='human') message('Trade accepted',`${other.name} accepted your trade.`);
+        } else {log(`${other.name} declines ${p.name}'s trade.`);message('Trade declined',`${other.name} declined the trade.`)}
+        m.classList.remove('show');m.innerHTML='';resolve();
+      });
+      m.querySelector('#who').onchange=draw;
+    };
+    draw();
+  });
+}
+async function playTurn(){
+  if(S.gameover)return;
+  const p=S.players[S.current];
+  if(p.bankrupt){nextPlayer();return}
+  renderPlayers();renderControls();setMsg(`${p.name}'s turn`);
+  if(p.jailed){
+    const moved=await handleJail(p);
+    if(!moved||S.gameover){if(!S.gameover)nextPlayer();return}
+    await land(p);
+    if(S.gameover||p.bankrupt){if(!S.gameover)nextPlayer();return}
+    await manage(p);nextPlayer();return;
+  }
+  let doubles=0;
+  while(true){
+    const [a,b]=await rollFor(p);
+    if(a===b){doubles++;if(doubles===3){log(`${p.name} rolled three doubles — straight to jail!`,true);goToJail(p);break}}
+    await moveSteps(p,a+b);
+    await land(p);
+    if(S.gameover||p.bankrupt)break;
+    if(a===b&&doubles<3){log(`${p.name} rolls doubles — roll again!`);continue}
+    break;
+  }
+  if(S.gameover)return;
+  if(p.bankrupt){nextPlayer();return}
+  await manage(p);
+  nextPlayer();
+}
+setup();
+
+</script>
+</body>
+</html>

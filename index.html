@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monopoly — Original Atlantic City Edition</title>
+<style>
+  :root{--ink:#1c241e;--paper:#f7f2df;--green:#12412f;--gold:#d9ab4a}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(circle at 50% 0,#214f3a,#0d2a1e 70%);color:#f4f1e6;font-family:Georgia,'Times New Roman',serif;min-height:100vh}
+  header{text-align:center;padding:18px 12px 8px}
+  header h1{margin:0;font-size:clamp(24px,4vw,38px);letter-spacing:.14em;color:var(--gold);text-transform:uppercase}
+  header p{margin:4px 0 0;font-size:13px;color:#b9d4c4;letter-spacing:.06em}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;max-width:1380px;margin:0 auto;padding:12px 16px 40px;align-items:start}
+  .board-wrap{background:#e8e1c8;padding:10px;border-radius:10px;box-shadow:0 18px 45px #0007,0 0 0 4px #0a2018}
+  .board{display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);width:100%;aspect-ratio:1;background:var(--paper);border:2px solid #2c3a2f;position:relative;overflow:hidden}
+  .tile{position:relative;background:#fbf8ea;border:.5px solid #0002;overflow:hidden;padding:3px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;text-align:center;color:var(--ink);font-family:Arial,Helvetica,sans-serif;line-height:1.05;min-width:0;min-height:0}
+  .tile.corner{background:#f0e9cf;justify-content:center;gap:3px}
+  .tile .bar{position:absolute;background:#888;z-index:0}
+  .bar-bottom .bar{bottom:0;left:0;right:0;height:22%}
+  .bar-top .bar{top:0;left:0;right:0;height:22%}
+  .bar-left .bar{left:0;top:0;bottom:0;width:22%}
+  .bar-right .bar{right:0;top:0;bottom:0;width:22%}
+  .tile .nm{position:relative;z-index:1;font-size:clamp(5px,.72vw,10px);font-weight:700;letter-spacing:-.02em;margin-bottom:2px;word-break:break-word}
+  .tile .pr,.tile .sub{position:relative;z-index:1;font-size:clamp(5px,.62vw,9px);color:#3d463d}
+  .tile .icon{font-size:clamp(12px,1.6vw,24px);line-height:1;z-index:1}
+  .tile .arrow{font-size:clamp(12px,1.6vw,22px);color:#b3372d;transform:rotate(90deg);z-index:1}
+  .tile.mortgaged{opacity:.55}
+  .tile.mortgaged::after{content:'MORTGAGED';position:absolute;inset:0;display:grid;place-items:center;font-size:7px;font-weight:800;color:#a22;background:#fff9;z-index:3}
+  .owner-dot{position:absolute;top:2px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;border:1px solid #0008;z-index:2}
+  .houses{position:absolute;bottom:2px;right:2px;display:flex;gap:1px;z-index:2}
+  .houses i{width:4px;height:7px;background:#2c8f4e;border:1px solid #14512a;display:block}
+  .houses i.hotel{background:#c0392b;border-color:#7d2018;width:6px;height:9px}
+  .tokens{position:absolute;inset:0;display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:center;gap:0;z-index:4;pointer-events:none}
+  .tk{font-size:clamp(9px,1.25vw,17px);line-height:1;text-shadow:0 1px 2px #fff,0 0 3px #fff;filter:drop-shadow(0 1px 1px #0006)}
+  .center{grid-row:2/11;grid-column:2/11;background:#dcead6;border:3px double #8aa587;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:8px;position:relative}
+  .logo{font-size:clamp(18px,3vw,38px);font-weight:900;letter-spacing:.08em;color:#a93a2b;line-height:.95;text-shadow:1px 1px 0 #fff}
+  .logo small{display:block;font-size:clamp(6px,.8vw,11px);letter-spacing:.35em;color:#2f6349;margin-top:5px}
+  .msg{font-family:Arial,sans-serif;font-size:clamp(8px,1.05vw,14px);color:#244a37;min-height:2.4em;max-width:90%}
+  .dice{font-size:clamp(26px,4.5vw,58px);display:flex;gap:12px;line-height:1;color:#162a20}
+  .dice .rolling{animation:shake .12s infinite alternate}
+  @keyframes shake{from{transform:rotate(-12deg) scale(.94)}to{transform:rotate(12deg) scale(1.05)}}
+  .turn{font-family:Arial,sans-serif;font-size:clamp(8px,1vw,13px);font-weight:700;color:#173f2e}
+  .hint{font-family:Arial,sans-serif;font-size:clamp(7px,.9vw,11px);color:#4a6b57}
+  aside{display:flex;flex-direction:column;gap:12px}
+  .card{display:none;background:#f7f2df;color:var(--ink);border-radius:10px;padding:14px;box-shadow:0 8px 24px #0004;border:1px solid #cbbd91}
+  .card h2{margin:0 0 8px;font-size:19px;color:#1d4a35}
+  .card h3{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#6b5c35}
+  .card p{font-size:13px;line-height:1.45;margin:0 0 10px}
+  .opts{display:grid;gap:10px;margin:12px 0}
+  label{font-family:Arial,sans-serif;font-size:12px;display:grid;gap:4px}
+  select,input{font-family:Arial,sans-serif;font-size:13px;padding:7px;border:1px solid #b9ae89;border-radius:5px;background:#fffdf5;color:var(--ink);min-width:0}
+  .btns{display:flex;flex-wrap:wrap;gap:7px}
+  button{font-family:Arial,sans-serif;font-size:12px;font-weight:700;padding:9px 12px;border:1px solid #a99a71;border-radius:6px;background:#fffdf3;color:#23352a;cursor:pointer}
+  button:hover:not(:disabled){background:#e9e2c6}
+  button:disabled{opacity:.42;cursor:not-allowed}
+  button.primary{background:#1d6b47;border-color:#13482f;color:#fff}
+  button.primary:hover:not(:disabled){background:#238459}
+  #players{display:grid;gap:6px}
+  .p-row{display:flex;align-items:center;gap:8px;border:1px solid #d6cbab;border-radius:7px;padding:7px 8px;background:#fffdf4;font-family:Arial,sans-serif;font-size:12px}
+  .p-row.active{border-color:#1d6b47;background:#e6f3e7;box-shadow:0 0 0 1px #1d6b47 inset}
+  .p-row.bankrupt{opacity:.45;text-decoration:line-through}
+  .p-row .sw{width:11px;height:11px;border-radius:3px;flex:none}
+  .p-row .nm{font-weight:700}
+  .p-row .meta{font-size:10px;color:#6a6f5f;display:block}
+  .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
+  #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
+  #log .hi{font-weight:700;color:#1c6746}
+  .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
+  .overlay.show{display:flex}
+  .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
+  .banner{font-size:19px;font-weight:800;color:#a93a2b;border-bottom:2px solid #d8c99a;padding-bottom:9px;margin-bottom:12px}
+  .dialog p{font-family:Arial,sans-serif;font-size:14px;line-height:1.5}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  #winner{text-align:center}
+  #winnerText{font-size:32px;color:var(--gold);margin:8px 0}
+  #winnerSub{font-family:Arial,sans-serif;font-size:14px;color:#d7e7db;margin-bottom:18px}
+  @media(max-width:950px){.layout{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}#log{max-height:160px}}
+  @media(max-width:480px){.tile .nm{font-size:5px}.tile .pr,.tile .sub{font-size:5px}.board-wrap{padding:5px}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Monopoly</h1>
+  <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
+</header>
+<div class="layout">
+  <div class="board-wrap"><div class="board" id="board"></div></div>
+  <aside>
+    <div class="card" id="setup" style="display:block"></div>
+    <div class="card" id="gameCards" style="display:none"><h3>Now playing</h3><div id="players"></div></div>
+    <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
+    <div class="card" id="logCard" style="display:none"><h3>Game log</h3><div id="log"></div></div>
+  </aside>
+</div>
+<div class="overlay" id="modal"></div>
+<div class="overlay" id="winner"><div class="dialog"><div class="banner">Game over</div><div id="winnerText"></div><div id="winnerSub"></div><div class="btns"><button class="primary" onclick="location.reload()">Play again</button></div></div></div>
+<script src="game.js"></script>
+</body>
+</html>
