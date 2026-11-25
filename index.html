@@ -72,7 +72,10 @@
   .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
   #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
   #log .hi{font-weight:700;color:#1c6746}
-  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}
+  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}#panel .panel-title.thinking{display:inline-flex;align-items:center;gap:9px}
+  #panel .panel-title.thinking::before{content:'';width:13px;height:13px;flex:none;border:2px solid #1d6b47;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .p-row .cpu{font-size:10px;color:#5c6f60}
   #panel .panel-msg{font-family:Arial,sans-serif;font-size:12px;line-height:1.45;color:#3a4438;margin-bottom:10px}
   #panel .opts{margin:0}
   #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}

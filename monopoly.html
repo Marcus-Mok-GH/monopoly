@@ -72,7 +72,10 @@
   .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
   #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
   #log .hi{font-weight:700;color:#1c6746}
-  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}
+  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}#panel .panel-title.thinking{display:inline-flex;align-items:center;gap:9px}
+  #panel .panel-title.thinking::before{content:'';width:13px;height:13px;flex:none;border:2px solid #1d6b47;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .p-row .cpu{font-size:10px;color:#5c6f60}
   #panel .panel-msg{font-family:Arial,sans-serif;font-size:12px;line-height:1.45;color:#3a4438;margin-bottom:10px}
   #panel .opts{margin:0}
   #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
@@ -310,7 +313,7 @@ function renderPlayers(){
     const n=activePlayers().filter(o=>o.props().length).length;
     return `<div class="p-row ${p.id===S.current?'active':''} ${p.bankrupt?'bankrupt':''}">
       <span class="tk">${TOKENS[p.id]}</span>
-      <span class="info"><span class="nm">${p.name}${p.type==='ai'?' <span style="font-size:10px;color:#9fb0a1">(CPU)</span>':''}</span>
+      <span class="info"><span class="nm">${p.name}${p.type==='ai'?' <span class="cpu">(CPU'+(S.aiModel&&S.aiModel!=='local'?' · '+aiModelLabel(S.aiModel):'')+')</span>':''}</span>
       <span class="meta">${posName(p.pos)}${p.jailed?' · in jail':''} · ${p.props().length} properties${p.cards.cc+p.cards.chance?' · '+JAILFREE(p)+' out':''}</span></span>
       <span class="cash">${p.bankrupt?'—':money(p.cash)}</span></div>`;
   }).join('');
@@ -331,24 +334,320 @@ function showDice(a,b,mode){
 }
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
+/* ------------------------------------------------------------------
+   AI brain — computer players can be driven by a language model.
+   The model answers with a small JSON object; every decision falls back
+   to the built-in strategy when no model is configured or the call fails.
+------------------------------------------------------------------ */
+const AI_MODELS=[
+  {id:'local',label:'Built-in strategy (no API)'},
+  {id:'z-ai/glm-5.3-flash',label:'GLM 5.3 Flash'},
+  {id:'deepseek/deepseek-v4.1-flash',label:'DeepSeek V4.1 Flash'},
+  {id:'community/scriptsnsenses-sys/gpt-6-luna:free',label:'GPT-6 Luna (free)'}
+];
+const AI_STYLES=[
+  {key:'aggressive',text:'You are an aggressive monopolist. You buy almost anything that blocks a colour set, you build aggressively, and you never pass up a bargain.'},
+  {key:'cautious',text:'You are a cautious banker. You keep a fat cash reserve, you only buy when the numbers clearly work, and you build slowly.'},
+  {key:'collector',text:'You are a devoted collector. You buy to complete colour sets and snap up railroads, and you hate leaving a monopoly unfinished.'},
+  {key:'opportunist',text:'You are an opportunist. You pounce on cheap property, hoard cash for the right deal, and you trade when it pays.'},
+  {key:'saboteur',text:'You are a saboteur. Your first priority is to land on your opponents\' best property and block them.'}
+];
+const AI_SETTINGS_KEY='monopoly.ai.settings';
+function aiModelLabel(id){
+  const m=AI_MODELS.find(x=>x.id===id);
+  return m?m.label:'Built-in strategy';
+}
+function loadAiSettings(){
+  try{return JSON.parse(localStorage.getItem(AI_SETTINGS_KEY))||{}}catch(e){return {}}
+}
+function saveAiSettings(s){
+  try{localStorage.setItem(AI_SETTINGS_KEY,JSON.stringify(s))}catch(e){}
+}
+function aiConfig(){
+  const model=S&&S.aiModel?S.aiModel:'local';
+  if(model==='local'||(S&&S.aiProxyDead))return null;
+  const key=((S&&S.aiKey)||'').trim();
+  return {model,key,endpoint:key?'https://gen.pollinations.ai/v1/chat/completions':'/api/ai'};
+}
+function parseJsonLoose(text){
+  if(typeof text!=='string')return null;
+  let s=text
+    .replace(/<think>[\s\S]*?<\/think>/gi,'')
+    .replace(/<think>[\s\S]*$/i,'')
+    .replace(/```json|```/gi,'')
+    .trim();
+  const a=s.indexOf('{'),b=s.lastIndexOf('}');
+  if(a>-1&&b>a)s=s.slice(a,b+1);
+  try{return JSON.parse(s)}catch(e){}
+  try{return JSON.parse(s.replace(/,\s*([}\]])/g,'$1'))}catch(e){return null}
+}
+async function llmRaw(system,prompt,maxTokens=1500,timeoutMs=40000){
+  const cfg=aiConfig();
+  if(!cfg)return {text:'',err:'no model'};
+  const headers={'Content-Type':'application/json'};
+  if(cfg.key)headers.Authorization='Bearer '+cfg.key;
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  let status=0;
+  try{
+    const body={model:cfg.model,messages:[{role:'system',content:system},{role:'user',content:prompt}],max_tokens:maxTokens,temperature:0.2,reasoning_effort:'low'};
+    const res=await fetch(cfg.endpoint,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal});
+    status=res.status;
+    if(!res.ok){
+      const detail=await res.text().catch(()=>'');
+      if(/content_blocked|safety filter/i.test(detail))throw new Error('the provider refused this prompt');
+      throw new Error('HTTP '+res.status);
+    }
+    const data=await res.json();
+    const text=(data&&data.content)||(data&&data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||'';
+    return {text:typeof text==='string'?text:'',err:null};
+  }catch(err){
+    const aborted=err&&err.name==='AbortError';
+    const why=aborted?'timed out':(err&&err.message)||'failed';
+    if(!cfg.key&&status===404){
+      S.aiProxyDead=true;S.aiModel='local';
+      log('This deployment has no AI proxy — bots are using the built-in strategy. Paste a Pollinations key in "New game" to switch them to a language model.');
+      return {text:'',err:'no proxy'};
+    }
+    return {text:'',err:why};
+  }finally{clearTimeout(timer)}
+}
+function cleanWhy(s){
+  if(typeof s!=='string')return '';
+  return s.replace(/\s+/g,' ').trim().slice(0,110);
+}
+/* Some models answer in plain prose instead of JSON. Read the closing lines of
+   the answer and pick the decision out of them. */
+const BUY_GROUPS=[
+  {key:false,words:['decline','do not buy','don\'t buy','won\'t buy','will not buy','not buy','no purchase','skip','auction','keep your cash','hold off','let it go','pass on','reject','avoid','no,']},
+  {key:true,words:['buy','purchase','acquire','yes','take it','snap up']}
+];
+const BUILD_GROUPS=[
+  {key:false,words:['do not build','don\'t build','won\'t build','not build','no house','no hotel','skip building','instead of building','keep your cash','hold off','wait','decline','not yet','save up']},
+  {key:true,words:['build','house','hotel','construct','develop']}
+];
+const JAIL_GROUPS=[
+  {key:'card',words:['get out of jail','jail free card','use my card','use the card','card']},
+  {key:'pay',words:['pay','fifty','$50','fee']},
+  {key:'roll',words:['roll','doubles','dice','chance']}
+];
+function proseDecision(text,kind){
+  if(typeof text!=='string')return null;
+  const body=text.replace(/<think>[\s\S]*?<\/think>/gi,'').replace(/<think>[\s\S]*$/i,'').trim();
+  if(!body)return null;
+  const sentences=body.split(/[\n.!?]+/).map(s=>s.trim()).filter(s=>s.length>1);
+  if(!sentences.length)return null;
+  const tail=sentences.slice(-4);
+  const lastHit=(groups)=>{
+    for(let i=tail.length-1;i>=0;i--){
+      const s=tail[i].toLowerCase();
+      for(const g of groups){
+        if(g.words.some(w=>s.includes(w)))return g.key;
+      }
+    }
+    return null;
+  };
+  // The reason is the fullest closing line that is not the decision itself:
+  // "Neither scarcity nor cash concerns apply — buy it" should read as the
+  // first half, not the trailing "buy it".
+  const whyFor=(groups)=>{
+    const triggers=new Set(groups.flatMap(g=>g.words));
+    const reasons=tail.filter(s=>{
+      const l=s.toLowerCase();
+      return ![...triggers].some(w=>l.includes(w));
+    });
+    const best=(reasons.length?reasons:tail).slice().sort((a,b)=>b.length-a.length)[0]||'';
+    return cleanWhy(best);
+  };
+  if(kind==='buy'){
+    const hit=lastHit(BUY_GROUPS);
+    return hit===null?null:{buy:hit,why:whyFor(BUY_GROUPS),text:body};
+  }
+  if(kind==='build'){
+    const hit=lastHit(BUILD_GROUPS);
+    return hit===null?null:{build:hit,property:'',why:whyFor(BUILD_GROUPS),text:body};
+  }
+  if(kind==='jail'){
+    const hit=lastHit(JAIL_GROUPS);
+    if(hit==='card'&&/no card|without a card|don'?t use/.test(body))return null;
+    return hit===null?null:{action:hit,why:whyFor(JAIL_GROUPS),text:body};
+  }
+  if(kind==='bid'){
+    // the number we want is the one in the closing lines, not the one quoted earlier
+    const scan=s=>[...s.matchAll(/\$\s?([\d,]+)/g)].map(m=>Number(m[1].replace(/,/g,''))).filter(n=>Number.isFinite(n));
+    let amounts=scan(tail.slice(-2).join(' '));
+    if(!amounts.length)amounts=scan(body);
+    if(!amounts.length)return null;
+    return {maxBid:amounts[amounts.length-1],why,text:body};
+  }
+  return null;
+}
+async function llmDecision(kind,system,prompt,alt,maxTokens=1500){
+  let r=await llmRaw(system,prompt,maxTokens,40000);
+  let text=r.text;
+  if(!text&&alt){
+    await sleep(600);
+    const r2=await llmRaw(alt.system,alt.prompt,maxTokens,25000);
+    text=r2.text;
+    r=r2;
+  }
+  if(!text){
+    log(`AI unavailable (${r.err||'failed'}) — using the built-in strategy.`);
+    return null;
+  }
+  let obj=parseJsonLoose(text);
+  if(!obj||typeof obj!=='object')obj=proseDecision(text,kind);
+  if(!obj||typeof obj!=='object')return null;
+  if(kind==='buy'){
+    if(typeof obj.buy!=='boolean')return null;
+    return {buy:obj.buy,why:cleanWhy(obj.why||obj.reason||obj.explanation||''),text};
+  }
+  if(kind==='build'){
+    const build=obj.build===true||obj.build==='true';
+    const skip=obj.build===false||obj.build==='false';
+    if(!build&&!skip)return null;
+    return {build,property:String(obj.property||obj.name||obj.target||'').trim(),why:cleanWhy(obj.why||obj.reason||''),text};
+  }
+  if(kind==='jail'){
+    const a=String(obj.action||obj.choice||'').toLowerCase().trim();
+    if(!['card','pay','roll'].includes(a))return null;
+    return {action:a,why:cleanWhy(obj.why||obj.reason||''),text};
+  }
+  if(kind==='bid'){
+    const n=Number(obj.maxBid!==undefined?obj.maxBid:obj.bid);
+    if(!Number.isFinite(n))return null;
+    return {maxBid:Math.max(0,Math.floor(n)),why:cleanWhy(obj.why||obj.reason||''),text};
+  }
+  return null;
+}
+/* Opponents are described by seat letter rather than by their token names:
+   some hosted models refuse prompts that name the other players. */
+function seatLabel(i){return 'Player '+String.fromCharCode(65+i)}function aiStateSummary(p){
+  const mine=p.props().map(i=>`${T[i].name}${S.props[i].level?` (${S.props[i].level===5?'hotel':S.props[i].level+' house'+(S.props[i].level>1?'s':'')})`:''}${S.props[i].mortgaged?' [mortgaged]':''}`);
+  const rivals=activePlayers().filter(o=>o!==p).map(o=>`${seatLabel(o.id)} (${money(o.cash)}) owns ${o.props().map(i=>T[i].short.replace('\n',' ')).join(', ')||'nothing'}`);
+  return [
+    `Your cash: ${money(p.cash)}`,
+    `You are standing on ${T[p.pos].name}.`,
+    `Your properties (${mine.length}): ${mine.join('; ')||'none'}`,
+    `Other players:\n${rivals.map(r=>' - '+r).join('\n')}`
+  ].join('\n');
+}
+function thinking(p){
+  setMsg(`${p.name} is thinking…`);
+  panelHTML(`<div class="panel-title thinking">${p.name} is thinking…</div><div class="panel-msg">${aiModelLabel(S.aiModel)} is reading the board. This can take a few seconds.</div>`);
+}
+function thinkingDone(){panelIdle('Resolving the move…')}
+async function aiBuyDecision(p,i,localBuy){
+  const t=T[i],price=t.price;
+  if(!aiConfig())return {buy:localBuy(),why:''};
+  thinking(p);
+  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"buy":true or false,"why":"ten words or fewer"}.`;
+  const d=await llmDecision(
+    'buy',
+    system,
+    `You have landed on ${t.name}, which is unowned and costs ${money(price)}.\n${aiStateSummary(p)}\nBuy it for ${money(price)}, or decline and let it go to auction?`,
+    {system,prompt:`A board space is unowned and costs ${money(price)}. You have ${money(p.cash)}.\nShould you buy it? Reply with JSON only: {"buy":true or false,"why":"ten words or fewer"}.`}
+  );
+  thinkingDone();
+  if(!d||typeof d.buy!=='boolean')return {buy:localBuy(),why:''};
+  return {buy:d.buy,why:String(d.why||'').trim().slice(0,110)};
+}
+function aiSay(p,why){
+  if(why)log(`${p.name}: ${why}`);
+}
+async function aiBuildDecision(p){
+  const options=p.props().filter(i=>canBuild(p,i)&&p.cash>=T[i].house);
+  if(!options.length)return null;
+  if(!aiConfig())return null;
+  thinking(p);
+  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"build":true or false,"property":"exact property name","why":"ten words or fewer"}.`;
+  const canList=options.map(i=>`${T[i].name} (a house costs ${money(T[i].house)}, rent becomes ${money(T[i].rents[1])})`).join('; ');
+  const d=await llmDecision(
+    'build',
+    system,
+    `Your turn is ending and you may build houses on the properties you own.\n${aiStateSummary(p)}\nYou can build on: ${canList}.\nShould you build this turn?`,
+    {system,prompt:`Your turn is ending. You can build on: ${canList}.\nShould you build this turn? Reply with JSON only: {"build":true or false,"property":"exact property name","why":"ten words or fewer"}.`}
+  );
+  thinkingDone();
+  if(!d)return null;
+  if(d.build!==true)return {action:'skip',why:String(d.why||'').trim().slice(0,110)};
+  let pick=options.find(i=>T[i].name===String(d.property||'').trim());
+  if(!pick&&d.text){
+    // a prose answer names the property somewhere in the sentence
+    const low=String(d.text).toLowerCase();
+    pick=options.find(i=>low.includes(T[i].name.toLowerCase()));
+  }
+  if(!pick)return null;
+  return {action:'build',index:pick,why:String(d.why||'').trim().slice(0,110)};
+}
+async function aiJailDecision(p){
+  const local=()=>{
+    const useCard=p.cards.cc+p.cards.chance>0&&p.jailTurns<2;
+    const pay=!useCard&&(p.jailTurns>=2||p.cash>200);
+    return {action:useCard?'card':pay?'pay':'roll'};
+  };
+  if(!aiConfig())return local();
+  thinking(p);
+  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"action":"card" or "pay" or "roll","why":"ten words or fewer"}.`;
+  const d=await llmDecision(
+    'jail',
+    system,
+    `You are in jail (attempt ${p.jailTurns+1} of 3). ${aiStateSummary(p)}\nGet Out of Jail Free cards held: ${p.cards.cc+p.cards.chance}. Paying $50 releases you immediately; rolling for doubles is free but you stay in jail if the dice are not doubles.\nChoose "card", "pay" or "roll".`,
+    {system,prompt:`You are in jail (attempt ${p.jailTurns+1} of 3). You hold ${p.cards.cc+p.cards.chance} Get Out of Jail Free cards and have ${money(p.cash)}.\nPaying $50 releases you at once; rolling for doubles is free but you stay in jail if the dice are not doubles.\nChoose "card", "pay" or "roll". Reply with JSON only: {"action":"card" or "pay" or "roll","why":"ten words or fewer"}.`}
+  );
+  thinkingDone();
+  const action=d&&['card','pay','roll'].includes(String(d.action))?String(d.action):null;
+  if(!action)return local();
+  if(action==='card'&&p.cards.cc+p.cards.chance===0)return local();
+  if(action==='pay'&&p.cash<50)return local();
+  return {action,why:String(d.why||'').trim().slice(0,110)};
+}
+async function aiBidCap(p,t,key){
+  if(!aiConfig())return null;
+  if(!S.bidCaps)S.bidCaps={};
+  if(S.bidCaps[key]!==undefined)return S.bidCaps[key];
+  thinking(p);
+  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"maxBid":number,"why":"ten words or fewer"}.`;
+  const d=await llmDecision(
+    'bid',
+    system,
+    `${t.name} has gone to auction. ${aiStateSummary(p)}\nWhat is the most you would pay for it? It is worth about ${money(t.price)}.\nAnswer with a number of dollars.`,
+    {system,prompt:`A board space is being auctioned and is worth about ${money(t.price)}. You have ${money(p.cash)}.\nWhat is the most you would pay for it? Answer with JSON only: {"maxBid":number,"why":"ten words or fewer"}.`}
+  );
+  thinkingDone();
+  const n=d&&Number(d.maxBid);
+  const cap=Number.isFinite(n)?Math.max(0,Math.min(Math.floor(n),p.cash)):null;
+  S.bidCaps[key]=cap;
+  return cap;
+}
+
 function setup(){
+  const saved=loadAiSettings();
+  const modelOpts=AI_MODELS.map(m=>`<option value="${m.id}" ${m.id===saved.model?'selected':''}>${m.label}</option>`).join('');
   $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth. Pause any time with the button at the top right.</p>
   <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
-  <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label></div>
+  <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+  <label>Bot brains <select id="aiModel">${modelOpts}</select></label>
+  <label>Pollinations key <input id="aiKey" type="password" placeholder="Optional — use the server key" value="${saved.key||''}" autocomplete="off"></label></div>
+  <p style="font-size:11px;line-height:1.4;color:#5b6a55">Bots need a language model to think with. Leave the key blank on the Vercel build and the server's own key is used; on GitHub Pages, paste your Pollinations key so the browser can call the API directly.</p>
   <button class="primary" id="startBtn">Start game</button>`;
   $('#startBtn').onclick=()=>{
     const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
-    newGame(n,h);
+    const model=$('#aiModel').value, key=$('#aiKey').value.trim();
+    saveAiSettings({model,key});
+    newGame(n,h,model,key);
   };
 }
-function newGame(n,h){
+function newGame(n,h,model,key){
   S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,paused:false,
-     chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()])};
+     chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()]),
+     aiModel:model||'local',aiKey:key||'',aiProxyDead:false};
   const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
   for(let i=0;i<n;i++){
     const p={
       id:i,name:i<h?`Player ${i+1}`:names[i%names.length],type:i<h?'human':'ai',token:TOKENS[i],
       cash:1500,pos:0,jailed:false,jailTurns:0,cards:{cc:0,chance:0},bankrupt:false,
+      aiStyle:AI_STYLES[(i-h)%AI_STYLES.length],
       props(){return Object.keys(S.props).map(Number).filter(k=>S.props[k].owner===this.id)}
     };
     S.players.push(p);
@@ -359,6 +658,7 @@ function newGame(n,h){
   $('#pauseBtn').style.display='inline-block';
   initPause();
   log('Game started — '+n+' players, '+h+' human.',true);
+  if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
   setMsg('Let the games begin!');
   setTimeout(playTurn,600);
 }
@@ -505,7 +805,11 @@ async function offerBuy(p,i){
   let buy;
   if(p.type==='human') buy=(await ask({title:'Unowned property',msg:`${t.name} is for sale at ${money(price)}. Your cash: ${money(p.cash)}. If you decline it goes to auction.`,buttons:[
     {label:`Buy for ${money(price)}`,value:true,cls:'primary'},{label:'Auction it',value:false}]}))===true;
-  else buy=p.cash>=price+Math.min(180,price*.25) && (p.props().length<3||Math.random()<.72);
+  else{
+    const d=await aiBuyDecision(p,i,()=>p.cash>=price+Math.min(180,price*.25)&&(p.props().length<3||Math.random()<.72));
+    buy=d.buy;
+    aiSay(p,d.why);
+  }
   if(buy){
     if(p.cash<price){const ok=await raiseCash(p,price);if(!ok){declareBankrupt(p,null);return}}
     p.cash-=price;S.props[i].owner=p.id;
@@ -530,7 +834,9 @@ async function auction(starter,i){
       if(p.type==='human') bid=await ask({title:'Auction — '+t.name,msg:`Current bid: ${money(high)} by ${winner?winner.name:'no one'}. Your cash: ${money(p.cash)}.`,buttons:[
         {label:`Bid ${money(min)}`,value:min,cls:'primary',disabled:min>p.cash},{label:'Pass',value:0}]});
       else {
-        const cap=Math.min(p.cash,Math.floor(t.price*(t.group?1.25:1.1)));
+        const localCap=Math.min(p.cash,Math.floor(t.price*(t.group?1.25:1.1)));
+        const llmCap=await aiBidCap(p,t,`${p.id}:${i}`);
+        const cap=llmCap===null?localCap:Math.min(llmCap,p.cash,Math.floor(t.price*2));
         bid=min<=cap&&Math.random()<.75?min:0;
       }
       if(bid>high){high=bid;winner=p}else{active=active.filter(x=>x!==id)}
@@ -552,9 +858,16 @@ async function land(p){
       if(p.type==='human') await offerBuy(p,i);
       else {
         const price=t.price;
-        if(p.cash>=price+80&&(railCount(p)<4||utilCount(p)<2||Math.random()<.6)){
-          p.cash-=price;pr.owner=p.id;log(`${p.name} buys ${t.name} for ${money(price)}.`,true);renderBoard();renderPlayers();
-        } else await auction(p,i);
+        const d=await aiBuyDecision(p,i,()=>p.cash>=price+80&&(railCount(p)<4||utilCount(p)<2||Math.random()<.6));
+        if(d.buy&&p.cash>=price){
+          p.cash-=price;pr.owner=p.id;
+          log(`${p.name} buys ${t.name} for ${money(price)}.`,true);
+          aiSay(p,d.why);
+          renderBoard();renderPlayers();
+        } else {
+          aiSay(p,d.why);
+          await auction(p,i);
+        }
       }
     } else if(pr.owner!==p.id){
       const r=rentDue(i,p);
@@ -644,8 +957,10 @@ async function handleJail(p){
     const c=await ask({title:`${p.name} is in jail`,msg:`Turn ${p.jailTurns+1} of 3. Pay $50, roll for doubles, or use a card.`,buttons});
     pay=c==='pay';useCard=c==='card';
   } else {
-    useCard=p.cards.cc+p.cards.chance>0&&p.jailTurns<2;
-    pay=!useCard&&(p.jailTurns>=2||p.cash>200);
+    const d=await aiJailDecision(p);
+    useCard=d.action==='card';
+    pay=d.action==='pay';
+    aiSay(p,d.why);
   }
   if(useCard)useJailCard(p);
   if(p.jailed&&pay){
@@ -676,7 +991,7 @@ async function handleJail(p){
 }
 async function manage(p){
   if(p.type==='human') await manageModal(p);
-  else aiBuild(p);
+  else await aiBuild(p);
 }
 function canBuild(p,i){
   const t=T[i],pr=S.props[i];
@@ -685,7 +1000,20 @@ function canBuild(p,i){
   const min=Math.min(...T.map((x,j)=>x.group===t.group&&S.props[j].owner===p.id?S.props[j].level:99));
   return pr.level<=min;
 }
-function aiBuild(p){
+async function aiBuild(p){
+  if(aiConfig()){
+    const d=await aiBuildDecision(p);
+    if(d&&d.action==='build'){
+      const i=d.index,pr=S.props[i],cost=T[i].house;
+      p.cash-=cost;pr.level++;
+      log(`${p.name} builds ${pr.level===5?'a hotel on':'a house on'} ${T[i].name}.`,true);
+      aiSay(p,d.why);
+      renderBoard();renderPlayers();
+      return;
+    }
+    if(d){if(d.why)aiSay(p,d.why);return}
+    // the model could not be reached — fall through to the built-in strategy
+  }
   let guard=0;
   while(guard++<20){
     const options=p.props().filter(i=>canBuild(p,i)&&p.cash>=T[i].house+250);
