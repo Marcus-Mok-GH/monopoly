@@ -38,12 +38,18 @@
   .logo small{display:block;font-size:clamp(6px,.8vw,11px);letter-spacing:.35em;color:#2f6349;margin-top:5px}
   .msg{font-family:Arial,sans-serif;font-size:clamp(8px,1.05vw,14px);color:#244a37;min-height:2.4em;max-width:90%}
   .dice{font-size:clamp(26px,4.5vw,58px);display:flex;gap:12px;line-height:1;color:#162a20}
-  .dice .rolling{animation:shake .12s infinite alternate}
-  @keyframes shake{from{transform:rotate(-12deg) scale(.94)}to{transform:rotate(12deg) scale(1.05)}}
+  .dice span{display:inline-block;transition:transform .15s ease}
+  .dice .rolling{animation:shake .11s infinite alternate;filter:blur(.4px)}
+  .dice .revealed{animation:dicePop .5s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes shake{from{transform:rotate(-16deg) scale(.9) translateY(-2px)}to{transform:rotate(16deg) scale(1.06) translateY(1px)}}
+  @keyframes dicePop{0%{transform:rotate(-18deg) scale(.6);opacity:.4}60%{transform:rotate(8deg) scale(1.12);opacity:1}100%{transform:rotate(0) scale(1)}}
+  #diceInfo{font-family:Arial,sans-serif;font-size:clamp(10px,1.2vw,15px);font-weight:700;color:#1d4a35;min-height:1.2em;padding:2px 10px;border-radius:99px;background:#ffffffb8;border:1px solid #b9cdb9;opacity:0;transition:opacity .2s}
+  #diceInfo:not(:empty){opacity:1}
   .turn{font-family:Arial,sans-serif;font-size:clamp(8px,1vw,13px);font-weight:700;color:#173f2e}
   .hint{font-family:Arial,sans-serif;font-size:clamp(7px,.9vw,11px);color:#4a6b57}
   aside{display:flex;flex-direction:column;gap:12px}
   .card{display:none;background:#f7f2df;color:var(--ink);border-radius:10px;padding:14px;box-shadow:0 8px 24px #0004;border:1px solid #cbbd91}
+  .card.show{display:block}
   .card h2{margin:0 0 8px;font-size:19px;color:#1d4a35}
   .card h3{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#6b5c35}
   .card p{font-size:13px;line-height:1.45;margin:0 0 10px}
@@ -66,21 +72,25 @@
   .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
   #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
   #log .hi{font-weight:700;color:#1c6746}
+  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}
+  #panel .panel-msg{font-family:Arial,sans-serif;font-size:12px;line-height:1.45;color:#3a4438;margin-bottom:10px}
+  #panel .opts{margin:0}
+  #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
+  #panel .event b{display:block;color:#a93a2b;margin-bottom:4px}
+  #pauseBtn{float:right;background:#fffdf3}
   .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
   .overlay.show{display:flex}
   .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
   .banner{font-size:19px;font-weight:800;color:#a93a2b;border-bottom:2px solid #d8c99a;padding-bottom:9px;margin-bottom:12px}
   .dialog p{font-family:Arial,sans-serif;font-size:14px;line-height:1.5}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-  #winner{text-align:center}
-  #winnerText{font-size:32px;color:var(--gold);margin:8px 0}
-  #winnerSub{font-family:Arial,sans-serif;font-size:14px;color:#d7e7db;margin-bottom:18px}
   @media(max-width:950px){.layout{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}#log{max-height:160px}}
   @media(max-width:480px){.tile .nm{font-size:5px}.tile .pr,.tile .sub{font-size:5px}.board-wrap{padding:5px}.grid2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
+  <button id="pauseBtn" type="button" style="display:none">⏸ Pause</button>
   <h1>Monopoly</h1>
   <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
 </header>
@@ -88,13 +98,20 @@
   <div class="board-wrap"><div class="board" id="board"></div></div>
   <aside>
     <div class="card" id="setup" style="display:block"></div>
+    <div class="card" id="panel"></div>
     <div class="card" id="gameCards" style="display:none"><h3>Now playing</h3><div id="players"></div></div>
     <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
     <div class="card" id="logCard" style="display:none"><h3>Game log</h3><div id="log"></div></div>
   </aside>
 </div>
-<div class="overlay" id="modal"></div>
-<div class="overlay" id="winner"><div class="dialog"><div class="banner">Game over</div><div id="winnerText"></div><div id="winnerSub"></div><div class="btns"><button class="primary" onclick="location.reload()">Play again</button></div></div></div>
+<div class="overlay" id="pauseOverlay"><div class="dialog">
+  <div class="banner">Game paused</div>
+  <p>Take your time. The board is right where you left it.</p>
+  <details id="rulesBox"><summary style="cursor:pointer;font-weight:700">Classic rules</summary>
+    <p style="font-size:12px">Roll two dice and move. Doubles earn another roll; three in a row sends you to Jail. Buy unowned property or send it to auction. Pay rent when you land on someone else's property. Complete a colour set to build houses and hotels. Pass GO to collect $200. Mortgages raise cash at half the price. Bankruptcy transfers your assets to your creditor; last player standing wins.</p>
+  </details>
+  <div class="btns" style="margin-top:14px"><button class="primary" id="pauseResumeBtn" type="button">Resume game</button><button id="pauseRestartBtn" type="button">New game</button></div>
+</div></div>
 <script>
 const COL = {
   brown:'#7a4a25', lightblue:'#a6dcef', pink:'#d661a6', orange:'#f4902c',
@@ -182,9 +199,33 @@ const CHEST = [
 ];
 
 const $ = s => document.querySelector(s);
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+let resumeWaiters = [];
+async function sleep(ms){
+  let left = ms;
+  while(left > 0){
+    if(S && S.paused){ await new Promise(r => resumeWaiters.push(r)); continue }
+    const step = Math.min(left, 60);
+    await new Promise(r => setTimeout(r, step));
+    if(!S || !S.paused) left -= step;
+  }
+}
 let S = null;
 let diceTotal = 7;
+function setPaused(v){
+  if(!S || S.gameover)return;
+  S.paused=v;
+  $('#pauseOverlay').classList.toggle('show',v);
+  $('#pauseBtn').textContent=v?'▶ Resume':'⏸ Pause';
+  $('#pauseBtn').setAttribute('aria-pressed',String(v));
+  if(!v){resumeWaiters.splice(0).forEach(r=>r())}
+}
+function initPause(){
+  $('#pauseBtn').onclick=()=>{if(S&&!S.gameover)setPaused(!S.paused)};
+  $('#pauseResumeBtn').onclick=()=>setPaused(false);
+  $('#pauseRestartBtn').onclick=()=>location.reload();
+  $('#helpBtn').onclick=()=>{if(S&&!S.gameover){setPaused(true);$('#rulesBox').open=true}};
+  window.addEventListener('keydown',e=>{if(e.key==='Escape'&&S&&!S.gameover)setPaused(!S.paused)});
+}
 
 function log(msg, hi){
   S.log.push({msg,hi});
@@ -228,7 +269,7 @@ function buildBoard(){
   });
   const c=document.createElement('div');
   c.className='center';
-  c.innerHTML=`<div class="logo">MONOPOLY<small>ATLANTIC CITY</small></div><div class="msg" id="centerMsg">Roll the dice to begin</div><div class="dice" id="dice"><span>⚀</span><span>⚀</span></div><div class="turn" id="centerTurn"></div><div class="hint" id="hint"></div>`;
+  c.innerHTML=`<div class="logo">MONOPOLY<small>ATLANTIC CITY</small></div><div class="msg" id="centerMsg">Roll the dice to begin</div><div class="dice" id="dice"><span>⚀</span><span>⚀</span></div><div class="dice-info" id="diceInfo"></div><div class="turn" id="centerTurn"></div><div class="hint" id="hint"></div>`;
   board.appendChild(c);
 }
 function renderBoard(){
@@ -280,11 +321,18 @@ function renderControls(hint){
   if(hint!==undefined) $('#hint').textContent=hint;
 }
 function setMsg(s){const e=$('#centerMsg');if(e)e.textContent=s}
-function showDice(a,b){const d=$('#dice');if(!d)return;const faces=['⚀','⚁','⚂','⚃','⚄','⚅'];d.innerHTML=`<span class="${a?'':'rolling'}">${faces[a-1]||'⚀'}</span><span class="${b?'':'rolling'}">${faces[b-1]||'⚀'}</span>`}
+function showDice(a,b,mode){
+  const d=$('#dice');if(!d)return;
+  const faces=['⚀','⚁','⚂','⚃','⚄','⚅'];
+  const cls=mode==='rolling'?'rolling':mode==='reveal'?'revealed':'';
+  d.innerHTML=`<span class="${cls}">${faces[(a||1)-1]}</span><span class="${cls}">${faces[(b||1)-1]}</span>`;
+  const info=$('#diceInfo');
+  if(info) info.textContent = mode==='rolling' ? 'Rolling…' : (a&&b ? `${a} + ${b} = ${a+b}` : '');
+}
 function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
 
 function setup(){
-  $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth.</p>
+  $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth. Pause any time with the button at the top right.</p>
   <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
   <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label></div>
   <button class="primary" id="startBtn">Start game</button>`;
@@ -292,10 +340,9 @@ function setup(){
     const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
     newGame(n,h);
   };
-  $('#helpBtn').onclick=()=>message('Classic rules',`Roll two dice and move. Doubles earn another roll; three doubles in a row sends you to Jail. Buy unowned property or send it to auction. Rent is doubled on an unimproved property when its owner holds the whole colour group. Railways rent $25/$50/$100/$200 by how many you own; utilities charge 4× or 10× the dice. Build houses only with a complete colour group, evenly across the group. Free Parking pays nothing; taxes go to the Bank. Pass GO for $200. Bankruptcy transfers everything to your creditor; last player standing wins.`);
 }
 function newGame(n,h){
-  S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,
+  S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,paused:false,
      chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()])};
   const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
   for(let i=0;i<n;i++){
@@ -309,40 +356,68 @@ function newGame(n,h){
   $('#setup').style.display='none';
   ['#gameCards','#playersCard','#logCard'].forEach(s=>$(s).style.display='block');
   buildBoard();renderBoard();renderPlayers();renderControls('Waiting for roll');
+  $('#pauseBtn').style.display='inline-block';
+  initPause();
   log('Game started — '+n+' players, '+h+' human.',true);
   setMsg('Let the games begin!');
   setTimeout(playTurn,600);
 }
 function nextPlayer(){
-  if(S.gameover)return;
+  if(!S||S.gameover)return;
+  if(S.paused){setTimeout(nextPlayer,250);return}
   let i=S.current;
   do{i=(i+1)%S.players.length}while(S.players[i].bankrupt&&i!==S.current);
   S.current=i;renderPlayers();renderControls(`${S.players[i].name}'s turn — roll when ready`);
   setTimeout(playTurn,500);
 }
 
-function ask({title,msg,buttons}){
+let panelSeq=0;
+function panelHTML(html){
+  panelSeq++;
+  const el=$('#panel');if(!el)return;
+  el.innerHTML=html;el.classList.add('show');
+}
+function panelIdle(text){
+  panelHTML(`<div class="panel-idle">${text||'Waiting for the next action…'}</div>`);
+}
+function ask({title,msg,buttons,idle}){
   return new Promise(resolve=>{
-    const m=$('#modal');
-    m.classList.add('show');
-    const render=()=>{
-      m.innerHTML=`<div class="dialog"><div class="banner">${title}</div><p>${msg}</p><div class="btns">${buttons.map((b,i)=>`<button class="${b.cls||''}" data-i="${i}" ${b.disabled?'disabled':''}>${b.label}</button>`).join('')}</div></div>`;
-      m.querySelectorAll('button[data-i]').forEach(btn=>btn.onclick=()=>{m.classList.remove('show');m.innerHTML='';resolve(buttons[+btn.dataset.i].value)});
-    };
-    render();
+    panelHTML(`<div class="panel-title">${title}</div><div class="panel-msg">${msg}</div><div class="btns">${buttons.map((b,i)=>`<button class="${b.cls||''}" data-i="${i}" ${b.disabled?'disabled':''}>${b.label}</button>`).join('')}</div>`);
+    const seq=panelSeq;
+    const el=$('#panel');
+    el.querySelectorAll('button[data-i]').forEach(btn=>btn.onclick=()=>{
+      if(seq!==panelSeq)return;
+      const v=buttons[+btn.dataset.i].value;
+      panelIdle(idle||'Resolving the move…');
+      resolve(v);
+    });
   });
 }
-function message(title,msg){
-  return ask({title,msg,buttons:[{label:'OK',value:'ok',cls:'primary'}]});
+async function message(title,msg){
+  panelHTML(`<div class="panel-title">${title}</div><div class="panel-msg">${msg}</div>`);
+  const seq=panelSeq;
+  setMsg(title);
+  log(`${title}: ${msg}`);
+  await sleep(S && S.players[S.current].type==='human' ? 1500 : 750);
+  if(seq===panelSeq) panelIdle('Read the log for details.');
+}
+async function rollAnimated(p){
+  const a=1+Math.floor(Math.random()*6),b=1+Math.floor(Math.random()*6);
+  const frames=p.type==='human'?11:7;
+  for(let i=0;i<frames;i++){
+    showDice(1+Math.floor(Math.random()*6),1+Math.floor(Math.random()*6),'rolling');
+    await sleep(75);
+  }
+  showDice(a,b,'reveal');diceTotal=a+b;
+  setMsg(`${p.name} rolled ${a} + ${b} = ${diceTotal}`);
+  panelIdle(`${p.name} rolled ${a} + ${b} = ${diceTotal}`);
+  await sleep(p.type==='human'?2800:1300);
+  return [a,b];
 }
 async function rollFor(p){
-  if(p.type==='human') await ask({title:`${p.name} — roll the dice`,msg:'Click to roll. Doubles earn another roll; three doubles in a row sends you straight to Jail.',buttons:[{label:'🎲 Roll dice',value:'roll',cls:'primary'}]});
-  else await sleep(700);
-  const a=1+Math.floor(Math.random()*6),b=1+Math.floor(Math.random()*6);
-  showDice(a,b);diceTotal=a+b;
-  setMsg(`${p.name} rolled ${a} + ${b} = ${diceTotal}`);
-  await sleep(420);
-  return [a,b];
+  if(p.type==='human') await ask({title:`${p.name} — roll the dice`,msg:'Click to roll. Doubles earn another roll; three doubles in a row sends you straight to Jail.',buttons:[{label:'🎲 Roll dice',value:'roll',cls:'primary'}],idle:'Rolling the dice…'});
+  else await sleep(500);
+  return rollAnimated(p);
 }
 async function moveSteps(p,steps){
   for(let k=0;k<steps;k++){
@@ -419,9 +494,9 @@ function declareBankrupt(p,creditor){
   if(left.length===1){
     S.gameover=true;
     const w=left[0];
-    $('#winnerText').textContent=w.name+' wins!';
-    $('#winnerSub').textContent=`${w.name} ends with ${money(w.cash)} in cash and ${w.props().length} properties.`;
-    $('#winner').classList.add('show');
+    $('#pauseBtn').style.display='none';
+    panelHTML(`<div class="panel-title">Game over</div><div class="panel-msg">${w.name} wins with ${money(w.cash)} in cash and ${w.props().length} properties.</div><div class="btns"><button class="primary" onclick="location.reload()">Play again</button></div>`);
+    setMsg(`${w.name} wins!`);
     log(`${w.name} wins the game!`,true);
   }
 }
@@ -623,7 +698,7 @@ function aiBuild(p){
 }
 function manageModal(p){
   return new Promise(resolve=>{
-    const m=$('#modal');m.classList.add('show');
+    const el=$('#panel');
     const draw=()=>{
       const owned=p.props();
       const buildOpts=owned.filter(i=>canBuild(p,i));
@@ -631,8 +706,9 @@ function manageModal(p){
       const mortOpts=owned.filter(i=>S.props[i].level===0&&!S.props[i].mortgaged);
       const unmortOpts=owned.filter(i=>S.props[i].mortgaged&&p.cash>=Math.ceil(T[i].price/2*1.1));
       const opt=(list)=>list.length?list.map(i=>`<option value="${i}">${T[i].name}</option>`).join(''):'<option value="">— none available —</option>';
-      m.innerHTML=`<div class="dialog"><div class="banner">${p.name} — manage your turn</div>
-      <p>Cash: <b>${money(p.cash)}</b> · Properties: ${owned.length}</p>
+      el.classList.add('show');
+      el.innerHTML=`<div class="panel-title">${p.name} — manage your turn</div>
+      <div class="panel-msg">Cash: <b>${money(p.cash)}</b> · Properties: ${owned.length}</div>
       <div class="grid2">
       <label>Build a house or hotel<select id="buildSel">${opt(buildOpts)}</select></label>
       <label>Sell a house<select id="sellSel">${opt(sellOpts)}</select></label>
@@ -646,16 +722,16 @@ function manageModal(p){
       <button data-a="unmort" ${unmortOpts.length?'':'disabled'}>Unmortgage</button>
       <button data-a="trade">Trade…</button>
       <button class="primary" data-a="done">End turn ✔</button>
-      </div></div>`;
-      m.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
+      </div>`;
+      el.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
         const a=b.dataset.a;
-        const val=id=>+(m.querySelector(id)||{}).value||0;
+        const val=id=>+(el.querySelector(id)||{}).value||0;
         if(a==='build'){const i=val('#buildSel');if(i){const c=T[i].house;if(p.cash>=c){p.cash-=c;S.props[i].level++;log(`${p.name} builds on ${T[i].name}.`);renderBoard();renderPlayers()}}}
         if(a==='sell'){const i=val('#sellSel');if(i){S.props[i].level--;p.cash+=saleValue(i);log(`${p.name} sells a house on ${T[i].name}.`);renderBoard();renderPlayers()}}
         if(a==='mort'){const i=val('#mortSel');if(i){S.props[i].mortgaged=true;p.cash+=Math.floor(T[i].price/2);log(`${p.name} mortgages ${T[i].name}.`);renderBoard();renderPlayers()}}
         if(a==='unmort'){const i=val('#unmortSel');if(i){const c=Math.ceil(T[i].price/2*1.1);if(p.cash>=c){p.cash-=c;S.props[i].mortgaged=false;log(`${p.name} unmortgages ${T[i].name}.`);renderBoard();renderPlayers()}}}
         if(a==='trade'){await tradeModal(p)}
-        if(a==='done'){m.classList.remove('show');m.innerHTML='';resolve();return}
+        if(a==='done'){panelIdle('Turn complete. Roll when ready.');log(`${p.name} ends their turn.`,true);resolve();return}
         draw();
       });
     };
@@ -664,15 +740,16 @@ function manageModal(p){
 }
 function tradeModal(p){
   return new Promise(resolve=>{
-    const m=$('#modal');m.classList.add('show');
+    const el=$('#panel');
     const others=activePlayers().filter(o=>o!==p);
     const draw=()=>{
-      if(!others.length){resolve();return}
+      if(!others.length){panelIdle('No other active players to trade with.');resolve();return}
       const props=i=>i.props().map(k=>`<option value="${k}">${T[k].name}${S.props[k].level?' ('+S.props[k].level+' houses)':''}</option>`).join('');
-      const who=+(m.querySelector('#who')?.value??others[0].id);
+      const who=+(el.querySelector('#who')?.value??others[0].id);
       const other=S.players[who]||others[0];
-      m.innerHTML=`<div class="dialog"><div class="banner">Propose a trade</div>
-      <p>Offer ${other.name} a deal. They will accept if it is fair to them.</p>
+      el.classList.add('show');
+      el.innerHTML=`<div class="panel-title">Propose a trade</div>
+      <div class="panel-msg">Offer ${other.name} a deal. They will accept if it is fair to them.</div>
       <div class="grid2">
       <label>Trade with<select id="who">${others.map(o=>`<option value="${o.id}" ${o===other?'selected':''}>${o.name}</option>`).join('')}</select></label>
       <label></label>
@@ -680,14 +757,14 @@ function tradeModal(p){
       <label>You give cash<input id="giveCash" type="number" min="0" max="${p.cash}" value="0"></label>
       <label>You receive property<select id="getProp"><option value="">— none —</option>${props(other)}</select></label>
       <label>You receive cash<input id="getCash" type="number" min="0" max="${other.cash}" value="0"></label>
-      </div><div class="btns"><button data-a="send" class="primary">Send offer</button><button data-a="cancel">Cancel</button></div></div>`;
-      m.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
-        if(b.dataset.a==='cancel'){m.classList.remove('show');m.innerHTML='';resolve();return}
-        const giveP=+(m.querySelector('#giveProp').value||0), getP=+(m.querySelector('#getProp').value||0);
-        const giveC=Math.max(0,Math.min(p.cash,+(m.querySelector('#giveCash').value||0)));
-        const getC=Math.max(0,Math.min(other.cash,+(m.querySelector('#getCash').value||0)));
-        const v=(i,o)=>i?T[i].price+S.props[i].level*T[i].house:0;
-        const giveVal=v(giveP,p)+giveC, getVal=v(getP,other)+getC;
+      </div><div class="btns"><button data-a="send" class="primary">Send offer</button><button data-a="cancel">Cancel</button></div>`;
+      el.querySelectorAll('button[data-a]').forEach(b=>b.onclick=async()=>{
+        if(b.dataset.a==='cancel'){panelIdle('Trade cancelled.');resolve();return}
+        const giveP=+(el.querySelector('#giveProp').value||0), getP=+(el.querySelector('#getProp').value||0);
+        const giveC=Math.max(0,Math.min(p.cash,+(el.querySelector('#giveCash').value||0)));
+        const getC=Math.max(0,Math.min(other.cash,+(el.querySelector('#getCash').value||0)));
+        const v=(i)=>i?T[i].price+S.props[i].level*T[i].house:0;
+        const giveVal=v(giveP)+giveC, getVal=v(getP)+getC;
         let accepted=true;
         if(other.type==='ai') accepted=getVal>=giveVal*.92 && other.cash>=getC && p.cash>=giveC;
         else accepted=await ask({title:`Trade from ${p.name}`,msg:`Offers ${giveP?T[giveP].name:'nothing'} + ${money(giveC)} for ${getP?T[getP].name:'nothing'} + ${money(getC)}. Accept?`,buttons:[{label:'Accept',value:true,cls:'primary'},{label:'Decline',value:false}]});
@@ -697,16 +774,19 @@ function tradeModal(p){
           p.cash+=getC-giveC;other.cash+=giveC-getC;
           log(`${p.name} and ${other.name} complete a trade.`,true);
           renderBoard();renderPlayers();
-          if(other.type==='human') message('Trade accepted',`${other.name} accepted your trade.`);
-        } else {log(`${other.name} declines ${p.name}'s trade.`);message('Trade declined',`${other.name} declined the trade.`)}
-        m.classList.remove('show');m.innerHTML='';resolve();
+          await message('Trade accepted',`${other.name} accepted your trade.`);
+        } else {log(`${other.name} declines ${p.name}'s trade.`);await message('Trade declined',`${other.name} declined the trade.`)}
+        panelIdle('Back to your turn.');
+        resolve();
       });
-      m.querySelector('#who').onchange=draw;
+      el.querySelector('#who').onchange=draw;
     };
     draw();
   });
 }
 async function playTurn(){
+  if(!S||S.gameover)return;
+  if(S.paused) await new Promise(r=>resumeWaiters.push(r));
   if(S.gameover)return;
   const p=S.players[S.current];
   if(p.bankrupt){nextPlayer();return}

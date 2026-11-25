@@ -3,6 +3,7 @@
 A complete, playable digital version of the classic 1935 Monopoly board game. No build step or dependencies: open `monopoly.html` in a browser and play.
 
 Live on GitHub Pages: https://marcus-mok-gh.github.io/monopoly/
+Live on Vercel: https://monopoly-dun.vercel.app
 
 ## Files
 

@@ -38,12 +38,18 @@
   .logo small{display:block;font-size:clamp(6px,.8vw,11px);letter-spacing:.35em;color:#2f6349;margin-top:5px}
   .msg{font-family:Arial,sans-serif;font-size:clamp(8px,1.05vw,14px);color:#244a37;min-height:2.4em;max-width:90%}
   .dice{font-size:clamp(26px,4.5vw,58px);display:flex;gap:12px;line-height:1;color:#162a20}
-  .dice .rolling{animation:shake .12s infinite alternate}
-  @keyframes shake{from{transform:rotate(-12deg) scale(.94)}to{transform:rotate(12deg) scale(1.05)}}
+  .dice span{display:inline-block;transition:transform .15s ease}
+  .dice .rolling{animation:shake .11s infinite alternate;filter:blur(.4px)}
+  .dice .revealed{animation:dicePop .5s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes shake{from{transform:rotate(-16deg) scale(.9) translateY(-2px)}to{transform:rotate(16deg) scale(1.06) translateY(1px)}}
+  @keyframes dicePop{0%{transform:rotate(-18deg) scale(.6);opacity:.4}60%{transform:rotate(8deg) scale(1.12);opacity:1}100%{transform:rotate(0) scale(1)}}
+  #diceInfo{font-family:Arial,sans-serif;font-size:clamp(10px,1.2vw,15px);font-weight:700;color:#1d4a35;min-height:1.2em;padding:2px 10px;border-radius:99px;background:#ffffffb8;border:1px solid #b9cdb9;opacity:0;transition:opacity .2s}
+  #diceInfo:not(:empty){opacity:1}
   .turn{font-family:Arial,sans-serif;font-size:clamp(8px,1vw,13px);font-weight:700;color:#173f2e}
   .hint{font-family:Arial,sans-serif;font-size:clamp(7px,.9vw,11px);color:#4a6b57}
   aside{display:flex;flex-direction:column;gap:12px}
   .card{display:none;background:#f7f2df;color:var(--ink);border-radius:10px;padding:14px;box-shadow:0 8px 24px #0004;border:1px solid #cbbd91}
+  .card.show{display:block}
   .card h2{margin:0 0 8px;font-size:19px;color:#1d4a35}
   .card h3{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#6b5c35}
   .card p{font-size:13px;line-height:1.45;margin:0 0 10px}
@@ -66,21 +72,25 @@
   .p-row .cash{margin-left:auto;font-weight:800;white-space:nowrap}
   #log{font-family:Arial,sans-serif;font-size:11px;line-height:1.42;max-height:220px;overflow:auto;display:grid;gap:3px;color:#3a4438}
   #log .hi{font-weight:700;color:#1c6746}
+  #panel .panel-title{font-size:15px;font-weight:800;color:#1d4a35;margin-bottom:4px}
+  #panel .panel-msg{font-family:Arial,sans-serif;font-size:12px;line-height:1.45;color:#3a4438;margin-bottom:10px}
+  #panel .opts{margin:0}
+  #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
+  #panel .event b{display:block;color:#a93a2b;margin-bottom:4px}
+  #pauseBtn{float:right;background:#fffdf3}
   .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
   .overlay.show{display:flex}
   .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
   .banner{font-size:19px;font-weight:800;color:#a93a2b;border-bottom:2px solid #d8c99a;padding-bottom:9px;margin-bottom:12px}
   .dialog p{font-family:Arial,sans-serif;font-size:14px;line-height:1.5}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-  #winner{text-align:center}
-  #winnerText{font-size:32px;color:var(--gold);margin:8px 0}
-  #winnerSub{font-family:Arial,sans-serif;font-size:14px;color:#d7e7db;margin-bottom:18px}
   @media(max-width:950px){.layout{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}#log{max-height:160px}}
   @media(max-width:480px){.tile .nm{font-size:5px}.tile .pr,.tile .sub{font-size:5px}.board-wrap{padding:5px}.grid2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
+  <button id="pauseBtn" type="button" style="display:none">⏸ Pause</button>
   <h1>Monopoly</h1>
   <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
 </header>
@@ -88,13 +98,20 @@
   <div class="board-wrap"><div class="board" id="board"></div></div>
   <aside>
     <div class="card" id="setup" style="display:block"></div>
+    <div class="card" id="panel"></div>
     <div class="card" id="gameCards" style="display:none"><h3>Now playing</h3><div id="players"></div></div>
     <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
     <div class="card" id="logCard" style="display:none"><h3>Game log</h3><div id="log"></div></div>
   </aside>
 </div>
-<div class="overlay" id="modal"></div>
-<div class="overlay" id="winner"><div class="dialog"><div class="banner">Game over</div><div id="winnerText"></div><div id="winnerSub"></div><div class="btns"><button class="primary" onclick="location.reload()">Play again</button></div></div></div>
+<div class="overlay" id="pauseOverlay"><div class="dialog">
+  <div class="banner">Game paused</div>
+  <p>Take your time. The board is right where you left it.</p>
+  <details id="rulesBox"><summary style="cursor:pointer;font-weight:700">Classic rules</summary>
+    <p style="font-size:12px">Roll two dice and move. Doubles earn another roll; three in a row sends you to Jail. Buy unowned property or send it to auction. Pay rent when you land on someone else's property. Complete a colour set to build houses and hotels. Pass GO to collect $200. Mortgages raise cash at half the price. Bankruptcy transfers your assets to your creditor; last player standing wins.</p>
+  </details>
+  <div class="btns" style="margin-top:14px"><button class="primary" id="pauseResumeBtn" type="button">Resume game</button><button id="pauseRestartBtn" type="button">New game</button></div>
+</div></div>
 <script src="game.js"></script>
 </body>
 </html>
