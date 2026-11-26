@@ -106,7 +106,7 @@
     <div class="card" id="setup" style="display:block"></div>
     <div class="card" id="panel"></div>
     <div class="card" id="gameCards" style="display:none"><h3>Now playing</h3><div id="players"></div></div>
-    <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
+    <div class="card" id="playersCard" style="display:none"><h3>Manage</h3><p id="manageHint" style="font-size:12px">Use the Manage panel at the end of your turn to buy houses, mortgage property and trade.</p><button id="helpBtn" type="button">Classic rules</button></div>
     <div class="card" id="logCard" style="display:none"><h3>Game log</h3><div id="log"></div></div>
   </aside>
 </div>
@@ -211,6 +211,9 @@ function esc(s){
 }
 let resumeWaiters = [];
 async function sleep(ms){
+  /* The pace control shortens every wait: the dice, the moves, the pauses
+     between the bots' turns. */
+  if(S&&S.speed&&S.speed!==1)ms=Math.max(0,Math.round(ms*S.speed));
   let left = ms;
   while(left > 0){
     if(S && S.paused){ await new Promise(r => resumeWaiters.push(r)); continue }
@@ -359,8 +362,14 @@ const AI_MODELS=[
   {id:'mixed',label:'Mixed — one model per bot'},
   {id:'z-ai/glm-5.3-flash',label:'GLM 5.3 Flash'},
   {id:'deepseek/deepseek-v4.1-flash',label:'DeepSeek V4.1 Flash'},
+  {id:'minimax/minimax-m3.1-flash',label:'MiniMax M3.1 Flash'},
   {id:'community/scriptsnsenses-sys/gpt-6-luna:free',label:'GPT-6 Luna (free)'}
 ];
+
+/* The model that takes over the player's seat when the table plays itself. */
+const AUTOPLAY_MODEL='minimax/minimax-m3.1-flash';
+/* How fast the table moves. */
+const PACE_SPEED={slow:1.6,normal:1,fast:.4};
 /* The models a bot can be assigned when the player picks "Mixed". */
 const AI_LLM_MODELS=[
   'z-ai/glm-5.3-flash',
@@ -382,6 +391,15 @@ function botBrainLabel(p){
   const id=p.botModel||(S&&S.aiModel)||'local';
   if(id==='local'||id==='mixed')return '';
   return ' · '+aiModelLabel(id);
+}
+/* Which model a bot thinks with. "Mixed" hands out the list round-robin,
+   starting from the first computer seat. */
+function botBrainFor(model,i,h){
+  if(model==='mixed'){
+    const n=AI_LLM_MODELS.length;
+    return AI_LLM_MODELS[(((i-h)%n)+n)%n];
+  }
+  return (model&&model!=='local')?model:null;
 }
 function loadAiSettings(){
   try{return JSON.parse(localStorage.getItem(AI_SETTINGS_KEY))||{}}catch(e){return {}}
@@ -977,38 +995,69 @@ function setup(){
   const modelOpts=AI_MODELS.map(m=>`<option value="${m.id}" ${m.id===saved.model?'selected':''}>${m.label}</option>`).join('');
   const chatOpts=[['off','Off'],['round','After each round'],['turn','After every turn'],['always','Always — even on your turn']]
     .map(([v,l])=>`<option value="${v}" ${v===(saved.chatMode||'round')?'selected':''}>${l}</option>`).join('');
+  const seatOpts=[['off','You play'],['minimax','AI plays — MiniMax M3.1 Flash'],['bots','AI plays — same brain as the bots']]
+    .map(([v,l])=>`<option value="${v}" ${v===(saved.seatMode||'off')?'selected':''}>${l}</option>`).join('');
+  const paceOpts=[['slow','Relaxed'],['normal','Normal'],['fast','Fast']]
+    .map(([v,l])=>`<option value="${v}" ${v===(saved.pace||'normal')?'selected':''}>${l}</option>`).join('');
   $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth. Pause any time with the button at the top right.</p>
   <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
   <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+  <label>Your seat <select id="seatMode">${seatOpts}</select></label>
   <label>Bot brains <select id="aiModel">${modelOpts}</select></label>
   <label>Chat turns <select id="chatMode">${chatOpts}</select></label>
+  <label>Pace <select id="pace">${paceOpts}</select></label>
   <label>Pollinations key <input id="aiKey" type="password" placeholder="Optional — use the server key" value="${saved.key||''}" autocomplete="off"></label></div>
   <p style="font-size:11px;line-height:1.4;color:#5b6a55">Bots need a language model to think with. Leave the key blank on the Vercel build and the server's own key is used; on GitHub Pages, paste your Pollinations key so the browser can call the API directly.</p>
+  <p id="seatHint" style="font-size:11px;line-height:1.4;color:#5b6a55"></p>
   <p style="font-size:11px;line-height:1.4;color:#5b6a55">Chat turns are the second kind of turn: between the game turns the bots talk the board over, one line each, reacting to the position, what just happened and what the other bots said. Pick “Always” and the table never stops talking — the bots keep chatting through the game, even while you are deciding your move — and the 💬 Table talk button asks for a line whenever you fancy one.</p>
   <button class="primary" id="startBtn">Start game</button>`;
   $('#startBtn').onclick=()=>{
     const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
     const model=$('#aiModel').value, key=$('#aiKey').value.trim(), chatMode=$('#chatMode').value;
-    saveAiSettings({model,key,chatMode});
-    newGame(n,h,model,key,chatMode);
+    const seatMode=$('#seatMode').value, pace=$('#pace').value;
+    saveAiSettings({model,key,chatMode,seatMode,pace});
+    newGame(n,h,model,key,chatMode,seatMode,pace);
   };
+  /* Handing the seat to the AI means nobody human is at the table. */
+  const seatSel=$('#seatMode'),humSel=$('#numHumans'),hint=$('#seatHint');
+  const seatChanged=()=>{
+    const aiSeat=seatSel.value!=='off';
+    humSel.disabled=aiSeat;
+    hint.textContent=aiSeat
+      ? 'Every human seat is handed to the AI: the table plays itself and you watch. The first seat is played by MiniMax M3.1 Flash; the others use the bot brain below.'
+      : 'You take the first seat. The other seats are computer players.';
+  };
+  seatSel.onchange=seatChanged;
+  seatChanged();
 }
-function newGame(n,h,model,key,chatMode){
+function newGame(n,h,model,key,chatMode,seatMode,pace){
+  seatMode=seatMode||'off';
+  const autoSeat=seatMode!=='off';
   S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,paused:false,
      chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()]),
      aiModel:model||'local',aiKey:key||'',aiProxyDead:false,
      chatMode:chatMode||'off',chatPending:false,chatRotation:0,chatPhase:false,
      chatRunning:false,promptPending:false,
+     seatMode:seatMode,speed:PACE_SPEED[pace||'normal']||1,autoSeat:autoSeat,
      roundSeen:0,roundSize:n,turnJustEnded:false};
   const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
   for(let i=0;i<n;i++){
     const p={
       id:i,name:i<h?`Player ${i+1}`:names[i%names.length],type:i<h?'human':'ai',token:TOKENS[i],
       cash:1500,pos:0,jailed:false,jailTurns:0,cards:{cc:0,chance:0},bankrupt:false,
-      botModel:model==='mixed'?AI_LLM_MODELS[(i-h)%AI_LLM_MODELS.length]:(model&&model!=='local'?model:null),
+      botModel:botBrainFor(model,i,h),
       props(){return Object.keys(S.props).map(Number).filter(k=>S.props[k].owner===this.id)}
     };
     S.players.push(p);
+  }
+  /* Hand the table over to the AI: every human seat becomes a computer
+     seat, and the first of them is played by MiniMax M3.1 Flash. */
+  if(autoSeat){
+    for(let i=0;i<h&&i<S.players.length;i++){
+      const p=S.players[i];
+      p.type='ai';
+      p.botModel=(i===0&&seatMode==='minimax')?AUTOPLAY_MODEL:botBrainFor(model,i,h);
+    }
   }
   $('#setup').style.display='none';
   ['#gameCards','#playersCard','#logCard'].forEach(s=>$(s).style.display='block');
@@ -1017,9 +1066,14 @@ function newGame(n,h,model,key,chatMode){
   initPause();
   $('#talkBtn').style.display='inline-block';
   initTalk();
-  log('Game started — '+n+' players, '+h+' human.',true);
+  log('Game started — '+n+' players'+(autoSeat?', the table is playing itself':', '+h+' human')+'.',true);
+  if(autoSeat)log('Player 1 is played by '+aiModelLabel(S.players[0].botModel)+' — sit back and watch.',true);
   if(S.aiModel==='mixed')log('Bots are thinking with a mix of models: '+AI_LLM_MODELS.map(aiModelLabel).join(', ')+'.',true);
   else if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
+  if(autoSeat){
+    const hint=$('#manageHint');
+    if(hint)hint.textContent='The table is playing itself — every seat is a computer player. Pause it any time.';
+  }
   if(S.chatMode==='round')log('The table talks over each round.',true);
   else if(S.chatMode==='turn')log('The table talks after every turn.',true);
   else if(S.chatMode==='always')log('The table never stops talking — even while you are deciding your move.',true);

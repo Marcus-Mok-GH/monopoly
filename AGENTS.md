@@ -27,6 +27,10 @@ project name must be lowercase.
 
 ## AI bots
 - Bots pick a brain in the New game screen: built-in strategy, one shared model, or "Mixed" (one model per bot, assigned round-robin from `AI_LLM_MODELS`).
+- `AI_MODELS` also lists `minimax/minimax-m3.1-flash` ("MiniMax M3.1 Flash") and `AUTOPLAY_MODEL` points at it.
+- "Your seat" on the New game screen: `off` (you play), `minimax` (every human seat becomes a computer seat and the first one is played by MiniMax M3.1 Flash) or `bots` (your seat uses the bots' brain). `newGame(n,h,model,key,chatMode,seatMode,pace)` converts the human seats to `type:'ai'` when `seatMode!=='off'`, so the whole table plays itself with no human input.
+- `botBrainFor(model,i,h)` resolves a seat's brain (including the negative index that the first human seat produces in "Mixed").
+- "Pace" (`PACE_SPEED`: slow 1.6, normal 1, fast 0.4) scales every `sleep()`, so the table can be watched at different speeds.
 - `aiConfig(p)` resolves the model per bot from `p.botModel`; `botBrainLabel(p)` shows it in the player list.
 - Some hosted providers refuse prompts that name another player or use the board's street names. Those models get board numbers and colour groups instead of street names, and no opponent information at all — see `NO_RIVALS_MODELS` and `rivalsAllowed()`.
 - `llmDecision()` accepts JSON or prose, and retries with a blander prompt when the first answer is unusable.
