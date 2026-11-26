@@ -36,6 +36,9 @@ Choose the rhythm on the New game screen:
 - **Off** — game turns only
 - **After each round** — the bots talk once the table has gone round
 - **After every turn** — two bots weigh in between every game turn
+- **Always — even on your turn** — the table never stops talking. The bots chatter through the game on their own clock, so they keep talking while you are deciding your move, and they never hold the game up.
+
+The bots take the table in seat order: once the last one has had their say, the talk goes back round to the first. The **💬 Table talk** button in the header asks for a line whenever you fancy one — it works on your turn too, and the game carries on while the bot thinks it up.
 
 A bot on the built-in strategy has no model to think with, so it falls back to a stock line that still fits the position.
 

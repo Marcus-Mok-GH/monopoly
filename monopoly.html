@@ -81,7 +81,8 @@
   #panel .opts{margin:0}
   #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
   #panel .event b{display:block;color:#a93a2b;margin-bottom:4px}
-  #pauseBtn{float:right;background:#fffdf3}
+  #talkBtn{float:right;background:#fffdf3;margin-right:8px}
+  #pauseBtn{float:right;background:#fffdf3}  #pauseBtn{float:right;background:#fffdf3}
   .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
   .overlay.show{display:flex}
   .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
@@ -94,6 +95,7 @@
 </head>
 <body>
 <header>
+  <button id="talkBtn" type="button" style="display:none">💬 Table talk</button>
   <button id="pauseBtn" type="button" style="display:none">⏸ Pause</button>
   <h1>Monopoly</h1>
   <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
@@ -233,6 +235,12 @@ function initPause(){
   $('#pauseRestartBtn').onclick=()=>location.reload();
   $('#helpBtn').onclick=()=>{if(S&&!S.gameover){setPaused(true);$('#rulesBox').open=true}};
   window.addEventListener('keydown',e=>{if(e.key==='Escape'&&S&&!S.gameover)setPaused(!S.paused)});
+}
+/* A line of table talk on demand — the player can ask for one even on
+   their own turn, and the game carries on while the bot thinks it up. */
+function initTalk(){
+  const btn=$('#talkBtn');
+  if(btn)btn.onclick=()=>manualChat();
 }
 
 /* `chat` marks a line of table talk so it can be styled apart from the
@@ -846,7 +854,8 @@ function extractSay(text,p){
   if(s.length>220)s=s.slice(0,220).trim()+'…';
   return s;
 }
-async function aiChatLine(p,said){
+async function aiChatLine(p,said,opts){
+  opts=opts||{};
   if(!aiConfig(p))return cannedLine();
   const keepNames=rivalsAllowed(p.botModel||(S&&S.aiModel)||'local');
   const system=`${p.aiStyle.text}\nYou are one of the Monopoly players sitting at a table with the others. Say ONE line of table talk (under 25 words) about the game as it stands, in your style. React to what just happened. Reply with JSON only: {"say":"your line"}`;
@@ -861,8 +870,9 @@ async function aiChatLine(p,said){
     ? 'Already said at the table:\n'+said.map(s=>keepNames?`${s.name}: ${s.text}`:`${seatLabel(s.id)}: ${s.text}`).join('\n')+'\n'
     : '';
   const earlier=S.log.filter(l=>l.chat).slice(-3).map(l=>sanitiseLine(l.msg.replace(/^💬\s*/,''),keepNames)).join('\n');
-  const prompt=`Table talk after play.\n${state}\n${names}${events?'What just happened:\n'+events+'\n':''}${earlier?'Earlier at the table:\n'+earlier+'\n':''}${convo}Say your line now. JSON: {"say":"one short line"}`;
-  const alt=`Table talk between turns.\n${state}\nSay one short line (under 25 words) about the game. JSON: {"say":"your line"}`;
+  const head=opts.ambient?'Table talk while the game is still going.':'Table talk after play.';
+  const prompt=`${head}\n${state}\n${names}${events?'What just happened:\n'+events+'\n':''}${earlier?'Earlier at the table:\n'+earlier+'\n':''}${convo}Say your line now. JSON: {"say":"one short line"}`;
+  const alt=`${opts.ambient?'Chatter at the table while the game goes on.':'Table talk between turns.'}\n${state}\nSay one short line (under 25 words) about the game. JSON: {"say":"your line"}`;
   /* The small hosted models think out loud before they answer, so they need
      room for the thinking as well as for the line itself. */
   const r=await llmRaw(p,system,prompt,4000,25000,0.85);
@@ -871,39 +881,87 @@ async function aiChatLine(p,said){
   const r2=await llmRaw(p,system,alt,4000,20000,0.85);
   return extractSay(r2.text,p)||cannedLine();
 }
-function renderChatPanel(said){
-  panelHTML(`<div class="panel-title">Table talk</div><div class="panel-msg">${said.map(s=>`<b>${esc(s.name)}</b>: ${esc(s.text)}`).join('<br>')}</div>`);
+/* The bots take the table in seat order: once the last one has had their
+   say, the talk goes back round to the first. */
+function chatBots(){return S.players.filter(p=>p.type==='ai'&&!p.bankrupt)}
+function nextChatSpeaker(){
+  const bots=chatBots();
+  if(!bots.length)return null;
+  const i=S.chatRotation%bots.length;
+  S.chatRotation=(i+1)%bots.length;
+  return bots[i];
 }
+/* One bot says one line of table talk. */
+async function speakChat(p,said,opts){
+  opts=opts||{};
+  if(!p)return '';
+  const line=await aiChatLine(p,said||[],opts);
+  if(!line||!S)return '';
+  log(`💬 ${p.name}: ${line}`,false,true);
+  const brief=line.length>90?line.slice(0,90)+'…':line;
+  setMsg(`💬 ${p.name}: ${brief}`);
+  /* The action panel belongs to the player while a decision is waiting, so
+     table talk goes to the log and the message line instead. */
+  if(opts.panel&&!S.promptPending){
+    panelHTML(`<div class="panel-title">Table talk</div><div class="panel-msg"><b>${esc(p.name)}</b>: ${esc(line)}</div>`);
+  }
+  return line;
+}
+/* The chat turn: a few bots weigh in, one after the other, and the game
+   waits for them. */
 async function runChatTurn(){
-  const bots=S.players.filter(p=>p.type==='ai'&&!p.bankrupt);
+  if(!S||S.gameover||S.chatRunning)return;
+  const bots=chatBots();
   if(!bots.length)return;
   const cap=S.chatMode==='turn'?2:3;
-  const speakers=[];
-  for(let k=0;k<bots.length&&speakers.length<cap;k++)speakers.push(bots[(S.chatRotation+k)%bots.length]);
-  S.chatRotation=(S.chatRotation+speakers.length)%bots.length;
-  S.chatPending=false;
+  S.chatRunning=true;
   S.chatPhase=true;
+  S.chatPending=false;
   $('#centerTurn').textContent='Table talk';
-  setMsg('Table talk');
-  panelHTML('<div class="panel-title">Table talk</div><div class="panel-msg">The bots are talking the game over…</div>');
+  setMsg('The table is talking…');
   const said=[];
-  for(const p of speakers){
-    if(!S||S.gameover)break;
-    const line=await aiChatLine(p,said);
-    if(!line)continue;
-    said.push({id:p.id,name:p.name,text:line});
-    log(`💬 ${p.name}: ${line}`,false,true);
-    renderChatPanel(said);
-    setMsg(`${p.name}: ${line}`);
-    await sleep(900);
+  try{
+    for(let k=0;k<cap;k++){
+      if(!S||S.gameover)break;
+      const p=nextChatSpeaker();
+      if(!p)break;
+      const line=await speakChat(p,said,{panel:true});
+      if(line)said.push({id:p.id,name:p.name,text:line});
+      await sleep(900);
+    }
+  }finally{
+    S.chatPhase=false;
+    S.chatRunning=false;
   }
-  S.chatPhase=false;
-  if(S&&!S.gameover)panelIdle('The table settles. Play continues.');
+  if(S&&!S.gameover&&!S.promptPending)panelIdle('The table settles. Play continues.');
+}
+/* The table never stops talking: in "always" mode the bots keep chatting
+   through the game — including while you are deciding your move. */
+async function chatAutoLoop(){
+  while(S&&!S.gameover&&S.chatMode==='always'){
+    await sleep(3200+Math.random()*3800);
+    if(!S||S.gameover)break;
+    if(S.chatRunning)continue;
+    const p=nextChatSpeaker();
+    if(!p)break;
+    S.chatRunning=true;
+    try{await speakChat(p,[],{ambient:true,panel:false})}finally{S.chatRunning=false}
+  }
+}
+/* The player can ask for a line of table talk at any time, even on their
+   own turn. */
+async function manualChat(){
+  if(!S||S.gameover||S.chatRunning)return;
+  const p=nextChatSpeaker();
+  if(!p){panelIdle('There is nobody left to talk.');return}
+  S.chatRunning=true;
+  try{await speakChat(p,[],{ambient:true,panel:!S.promptPending})}finally{S.chatRunning=false}
 }
 /* Is a chat turn due? After every turn, or once the round is complete. */
 function chatDue(){
   if(!S||S.chatMode==='off')return false;
-  if(!S.players.some(p=>p.type==='ai'&&!p.bankrupt))return false;
+  if(S.chatMode==='always')return false;   /* the table talks on its own clock instead */
+  if(!chatBots().length)return false;
   if(S.chatMode==='turn')return true;
   return !!S.chatPending;
 }
@@ -922,7 +980,7 @@ function endTurn(){
 function setup(){
   const saved=loadAiSettings();
   const modelOpts=AI_MODELS.map(m=>`<option value="${m.id}" ${m.id===saved.model?'selected':''}>${m.label}</option>`).join('');
-  const chatOpts=[['off','Off'],['round','After each round'],['turn','After every turn']]
+  const chatOpts=[['off','Off'],['round','After each round'],['turn','After every turn'],['always','Always — even on your turn']]
     .map(([v,l])=>`<option value="${v}" ${v===(saved.chatMode||'round')?'selected':''}>${l}</option>`).join('');
   $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth. Pause any time with the button at the top right.</p>
   <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
@@ -931,7 +989,7 @@ function setup(){
   <label>Chat turns <select id="chatMode">${chatOpts}</select></label>
   <label>Pollinations key <input id="aiKey" type="password" placeholder="Optional — use the server key" value="${saved.key||''}" autocomplete="off"></label></div>
   <p style="font-size:11px;line-height:1.4;color:#5b6a55">Bots need a language model to think with. Leave the key blank on the Vercel build and the server's own key is used; on GitHub Pages, paste your Pollinations key so the browser can call the API directly.</p>
-  <p style="font-size:11px;line-height:1.4;color:#5b6a55">Chat turns are the second kind of turn: between the game turns the bots talk the board over, one line each, reacting to the position, what just happened and what the other bots said.</p>
+  <p style="font-size:11px;line-height:1.4;color:#5b6a55">Chat turns are the second kind of turn: between the game turns the bots talk the board over, one line each, reacting to the position, what just happened and what the other bots said. Pick “Always” and the table never stops talking — the bots keep chatting through the game, even while you are deciding your move — and the 💬 Table talk button asks for a line whenever you fancy one.</p>
   <button class="primary" id="startBtn">Start game</button>`;
   $('#startBtn').onclick=()=>{
     const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
@@ -945,6 +1003,7 @@ function newGame(n,h,model,key,chatMode){
      chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()]),
      aiModel:model||'local',aiKey:key||'',aiProxyDead:false,
      chatMode:chatMode||'off',chatPending:false,chatRotation:0,chatPhase:false,
+     chatRunning:false,promptPending:false,
      roundSeen:0,roundSize:n,turnJustEnded:false};
   const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
   for(let i=0;i<n;i++){
@@ -962,13 +1021,19 @@ function newGame(n,h,model,key,chatMode){
   buildBoard();renderBoard();renderPlayers();renderControls('Waiting for roll');
   $('#pauseBtn').style.display='inline-block';
   initPause();
+  $('#talkBtn').style.display='inline-block';
+  initTalk();
   log('Game started — '+n+' players, '+h+' human.',true);
   if(S.aiModel==='mixed')log('Bots are thinking with a mix of models: '+AI_LLM_MODELS.map(aiModelLabel).join(', ')+'.',true);
   else if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
   if(S.chatMode==='round')log('The table talks over each round.',true);
   else if(S.chatMode==='turn')log('The table talks after every turn.',true);
+  else if(S.chatMode==='always')log('The table never stops talking — even while you are deciding your move.',true);
   setMsg('Let the games begin!');
   setTimeout(playTurn,600);
+  /* In "always" mode the bots talk through the game on their own clock —
+     they do not wait for a turn to end, and they never hold the game up. */
+  if(S.chatMode==='always')chatAutoLoop();
 }
 async function nextPlayer(){
   if(!S||S.gameover)return;
@@ -1002,6 +1067,9 @@ function panelIdle(text){
 }
 function ask({title,msg,buttons,idle}){
   return new Promise(resolve=>{
+    /* While a decision is waiting the action panel belongs to the player —
+       table talk must not paint over it. */
+    if(S)S.promptPending=true;
     panelHTML(`<div class="panel-title">${title}</div><div class="panel-msg">${msg}</div><div class="btns">${buttons.map((b,i)=>`<button class="${b.cls||''}" data-i="${i}" ${b.disabled?'disabled':''}>${b.label}</button>`).join('')}</div>`);
     const seq=panelSeq;
     const el=$('#panel');
@@ -1009,6 +1077,7 @@ function ask({title,msg,buttons,idle}){
       if(seq!==panelSeq)return;
       const v=buttons[+btn.dataset.i].value;
       panelIdle(idle||'Resolving the move…');
+      if(S)S.promptPending=false;
       resolve(v);
     });
   });

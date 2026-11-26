@@ -34,11 +34,14 @@ project name must be lowercase.
 ## Chat turns
 - The game plays two kinds of turn: the game turn (roll, move, buy, build) and the chat turn, where the bots talk the board over.
 - `endTurn()` marks the end of a game turn; `nextPlayer()` runs a chat turn when `chatDue()` is true, then calls `advancePlayer()` to move the game on.
-- `chatMode` is set on the New game screen: `off`, `round` (after each round) or `turn` (after every turn). It is saved in `localStorage` with the other AI settings.
+- `chatMode` is set on the New game screen: `off`, `round` (after each round), `turn` (after every turn) or `always` (the table never stops talking). It is saved in `localStorage` with the other AI settings.
 - `aiChatLine()` asks for one line of table talk as JSON (`{"say":"..."}`); `extractSay()` also copes with prose and quoted answers.
 - Chat lines go into the log with the chat flag, which styles them apart from the game log (`#log .chat` in `index.html`).
 - Chat prompts use the same redaction as the decision prompts: street names become board numbers and colour groups, and player names become seat letters for `NO_RIVALS_MODELS`.
 - The chat prompts need a 4000-token budget — the small hosted models think out loud before answering.
+- The bots speak in seat order: `nextChatSpeaker()` hands the table to the next bot and wraps back to the first one, so The Shoe is followed by Mr. Monopoly.
+- `always` mode runs `chatAutoLoop()` — a background loop that speaks one line every few seconds whatever turn it is, without waiting for the game. `chatDue()` returns false in that mode so the between-turn chat does not double up.
+- `S.promptPending` is set while `ask()` waits for the player. Chat must never paint the action panel while that flag is set, or the pending buttons die and the game deadlocks.
 
 ## Notes
 - The Vercel project is `monopoly` under scope `sjdjdiejdrirhdkjejs-projects`; the account also has a second team (`pluh`) — do not deploy there by accident.

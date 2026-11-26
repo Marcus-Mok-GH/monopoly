@@ -81,7 +81,8 @@
   #panel .opts{margin:0}
   #panel .event{background:#fffdf0;border:1px dashed #bca66e;border-radius:7px;padding:10px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
   #panel .event b{display:block;color:#a93a2b;margin-bottom:4px}
-  #pauseBtn{float:right;background:#fffdf3}
+  #talkBtn{float:right;background:#fffdf3;margin-right:8px}
+  #pauseBtn{float:right;background:#fffdf3}  #pauseBtn{float:right;background:#fffdf3}
   .overlay{display:none;position:fixed;inset:0;background:#071a12c9;z-index:50;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)}
   .overlay.show{display:flex}
   .dialog{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fbf7e8;color:var(--ink);border:3px solid #bca66e;border-radius:10px;padding:20px;box-shadow:0 24px 60px #0009}
@@ -94,6 +95,7 @@
 </head>
 <body>
 <header>
+  <button id="talkBtn" type="button" style="display:none">💬 Table talk</button>
   <button id="pauseBtn" type="button" style="display:none">⏸ Pause</button>
   <h1>Monopoly</h1>
   <p>Original Atlantic City edition · 1935 rules · 40 spaces</p>
