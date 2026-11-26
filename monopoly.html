@@ -865,7 +865,7 @@ async function goto(p,dest,collect=true){
   if(collect&&dest<p.pos){p.cash+=200;log(`${p.name} passes GO and collects $200.`,true)}
   p.pos=dest;renderTokens();renderPlayers();await sleep(220);
 }
-function ownsGroup(p,g){return T.every((t,i)=>t.group!==g||S.props[i].owner===p.id)}
+function ownsGroup(p,g){return T.every((t,i)=>t.group!==g||(S.props[i]&&S.props[i].owner===p.id))}
 function railCount(p){return [5,15,25,35].filter(i=>S.props[i].owner===p.id).length}
 function utilCount(p){return [12,28].filter(i=>S.props[i].owner===p.id).length}
 function rentDue(i,payer){
