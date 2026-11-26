@@ -31,6 +31,15 @@ project name must be lowercase.
 - Some hosted providers refuse prompts that name another player or use the board's street names. Those models get board numbers and colour groups instead of street names, and no opponent information at all — see `NO_RIVALS_MODELS` and `rivalsAllowed()`.
 - `llmDecision()` accepts JSON or prose, and retries with a blander prompt when the first answer is unusable.
 
+## Chat turns
+- The game plays two kinds of turn: the game turn (roll, move, buy, build) and the chat turn, where the bots talk the board over.
+- `endTurn()` marks the end of a game turn; `nextPlayer()` runs a chat turn when `chatDue()` is true, then calls `advancePlayer()` to move the game on.
+- `chatMode` is set on the New game screen: `off`, `round` (after each round) or `turn` (after every turn). It is saved in `localStorage` with the other AI settings.
+- `aiChatLine()` asks for one line of table talk as JSON (`{"say":"..."}`); `extractSay()` also copes with prose and quoted answers.
+- Chat lines go into the log with the chat flag, which styles them apart from the game log (`#log .chat` in `index.html`).
+- Chat prompts use the same redaction as the decision prompts: street names become board numbers and colour groups, and player names become seat letters for `NO_RIVALS_MODELS`.
+- The chat prompts need a 4000-token budget — the small hosted models think out loud before answering.
+
 ## Notes
 - The Vercel project is `monopoly` under scope `sjdjdiejdrirhdkjejs-projects`; the account also has a second team (`pluh`) — do not deploy there by accident.
 - With `cleanUrls: true`, `/monopoly.html` 308-redirects to `/monopoly`.

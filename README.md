@@ -25,8 +25,19 @@ Bots can think with a language model instead of the built-in heuristic. Pick a b
 - **GLM 5.3 Flash**, **DeepSeek V4.1 Flash**, **GPT-6 Luna (free)** — every bot uses that model
 
 On the Vercel build the server's own Pollinations key is used (`POLLINATIONS_API_KEY`, a Vercel env var). On GitHub Pages there is no server, so paste your own Pollinations key into the setup screen and the browser calls the API directly.
-
 Two hosted providers run privacy filters that refuse prompts naming another player, and one provider also refuses the street names on the board. Bots on those models are therefore told board numbers and colour groups instead, and are not told who their opponents are.
+
+## Chat turns
+
+The table plays in two kinds of turn. The **game turn** is the usual one — roll, move, buy, build, trade. The **chat turn** sits between the game turns, where the bots talk the board over: each speaker is shown the state of the game, what just happened and what the other bots have already said, and answers with one line of table talk. Lines appear in the game log marked with 💬.
+
+Choose the rhythm on the New game screen:
+
+- **Off** — game turns only
+- **After each round** — the bots talk once the table has gone round
+- **After every turn** — two bots weigh in between every game turn
+
+A bot on the built-in strategy has no model to think with, so it falls back to a stock line that still fits the position.
 
 ## Rules implemented
 

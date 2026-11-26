@@ -84,6 +84,10 @@ const CHEST = [
 ];
 
 const $ = s => document.querySelector(s);
+/* Model output is shown to the player as text — never as markup. */
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 let resumeWaiters = [];
 async function sleep(ms){
   let left = ms;
@@ -112,11 +116,13 @@ function initPause(){
   window.addEventListener('keydown',e=>{if(e.key==='Escape'&&S&&!S.gameover)setPaused(!S.paused)});
 }
 
-function log(msg, hi){
-  S.log.push({msg,hi});
+/* `chat` marks a line of table talk so it can be styled apart from the
+   game log. */
+function log(msg, hi, chat){
+  S.log.push({msg,hi:!!hi,chat:!!chat});
   if(S.log.length>120) S.log.shift();
   const el=$('#log');
-  el.innerHTML=S.log.slice(-40).map(x=>`<div class="${x.hi?'hi':''}">${x.msg}</div>`).join('');
+  el.innerHTML=S.log.slice(-40).map(x=>`<div class="${x.hi?'hi':''}${x.chat?' chat':''}">${esc(x.msg)}</div>`).join('');
   el.scrollTop=el.scrollHeight;
 }
 function money(n){return '$'+n.toLocaleString('en-US')}function saleValue(i){return S.props[i].level===5?2*T[i].house:Math.floor(T[i].house/2)}
@@ -282,7 +288,7 @@ function parseJsonLoose(text){
   try{return JSON.parse(s)}catch(e){}
   try{return JSON.parse(s.replace(/,\s*([}\]])/g,'$1'))}catch(e){return null}
 }
-async function llmRaw(p,system,prompt,maxTokens=4000,timeoutMs=40000){
+async function llmRaw(p,system,prompt,maxTokens=4000,timeoutMs=40000,temperature=0.2){
   const cfg=aiConfig(p);
   if(!cfg)return {text:'',err:'no model'};
   const headers={'Content-Type':'application/json'};
@@ -294,7 +300,7 @@ async function llmRaw(p,system,prompt,maxTokens=4000,timeoutMs=40000){
     const messages=[{role:'system',content:system},{role:'user',content:prompt}];
     /* Asking for no visible reasoning is what keeps the small hosted models
        from writing a page of notes before they answer. */
-    const body={model:cfg.model,messages,max_tokens:maxTokens,temperature:0.2,reasoning_effort:'none'};
+    const body={model:cfg.model,messages,max_tokens:maxTokens,temperature,reasoning_effort:'none'};
     let res=await fetch(cfg.endpoint,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal});
     status=res.status;
     if(!res.ok){
@@ -635,27 +641,192 @@ async function aiBidCap(p,t,i,key){
   return cap;
 }
 
+/* ------------------------------------------------------------------
+   Chat turns — the second kind of turn. Between the game turns the bots
+   talk the board over: each speaker is shown the state of the game, what
+   just happened and what the other bots have already said, and answers
+   with a single line of table talk.
+------------------------------------------------------------------ */
+const CHAT_LINES=[
+  'This board is slow going.',
+  'Somebody at this table is about to lose it.',
+  'I can smell a monopoly forming.',
+  'Mind that cash pile.',
+  'Nice move — genuinely.',
+  'This is turning into a bloodbath.',
+  'Rents are about to hurt somebody.',
+  'Do not pass GO just yet.',
+  'I am watching all of you.',
+  'Trust nobody at this table.',
+  'Someone will pay for this.',
+  'The money always runs out.'
+];
+/* The colour group a player has all of, if any. */
+function monopolyGroup(o){
+  const groups=[...new Set(o.props().map(i=>T[i].group))].filter(Boolean);
+  for(const g of groups){
+    const all=[];
+    T.forEach((t,i)=>{if(t.group===g)all.push(i)});
+    if(all.length&&all.every(i=>S.props[i].owner===o.id))return g;
+  }
+  return null;
+}
+/* A bot with no language model still has something to say. */
+function cannedLine(){
+  const lines=CHAT_LINES.slice();
+  const owner=S.players.find(o=>!o.bankrupt&&monopolyGroup(o));
+  if(owner)lines.push(`${owner.name} has a monopoly and knows it.`);
+  const broke=S.players.filter(o=>!o.bankrupt).sort((a,b)=>a.cash-b.cash)[0];
+  if(broke&&broke.cash<200)lines.push(`${broke.name} is running on empty.`);
+  return lines[Math.floor(Math.random()*lines.length)];
+}
+/* Street names become board numbers and colour groups; player names become
+   seat letters for the one model that refuses to be asked about named
+   opponents. */
+function sanitiseLine(line,keepNames){
+  let out=String(line==null?'':line);
+  T.forEach((t,i)=>{
+    if(!t.name||!['prop','rail','util'].includes(t.type))return;
+    if(out.includes(t.name))out=out.split(t.name).join(propLabel(i));
+  });
+  if(!keepNames)S.players.forEach(p=>{
+    if(!p.name||p.name==='You'||!out.includes(p.name))return;
+    out=out.split(p.name).join(seatLabel(p.id));
+  });
+  return out;
+}
+/* The last few things that happened, cleaned up for the model. */
+function gameEvents(keepNames){
+  const raw=S.log.filter(l=>!l.chat).slice(-4).map(l=>l.msg);
+  if(!raw.length)return '';
+  return raw.map(l=>sanitiseLine(l,keepNames)).join('\n');
+}
+function escapeRegExp(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+/* The model may answer with JSON, with prose, or with a line in quotes —
+   take whatever it gave us and tidy it into one short line. */
+function extractSay(text,p){
+  if(typeof text!=='string')return '';
+  let s=text
+    .replace(/<think>[\s\S]*?<\/think>/gi,'')
+    .replace(/<think>[\s\S]*$/i,'')
+    .replace(/```json|```/gi,'')
+    .trim();
+  if(!s)return '';
+  const o=parseJsonLoose(s);
+  if(o&&typeof o==='object'){
+    const cand=o.say||o.line||o.message||o.text||o.talk||o.comment;
+    if(typeof cand==='string'&&cand.trim())s=cand;
+  }
+  s=String(s).trim();
+  if(p&&p.name)s=s.replace(new RegExp('^'+escapeRegExp(p.name)+'\\s*:\\s*','i'),'');
+  s=s.replace(/^Player\s+[A-H]\s*:\s*/i,'');
+  s=s.replace(/^(bot|ai|answer|reply|say|line|message|comment)\s*:\s*/i,'');
+  s=s.replace(/^[“”"'`]+/,'').replace(/[“”"'`]+$/,'').trim();
+  s=(s.split('\n').find(x=>x.trim())||'').replace(/\s+/g,' ').trim();
+  if(!s)return '';
+  if(s.length>220)s=s.slice(0,220).trim()+'…';
+  return s;
+}
+async function aiChatLine(p,said){
+  if(!aiConfig(p))return cannedLine();
+  const keepNames=rivalsAllowed(p.botModel||(S&&S.aiModel)||'local');
+  const system=`${p.aiStyle.text}\nYou are one of the Monopoly players sitting at a table with the others. Say ONE line of table talk (under 25 words) about the game as it stands, in your style. React to what just happened. Reply with JSON only: {"say":"your line"}`;
+  const state=aiStateSummary(p,keepNames);
+  const events=gameEvents(keepNames);
+  /* The seat letters the state block uses are spelled out for the models
+     that are allowed to know who is sitting where. */
+  const names=keepNames
+    ? 'Who is sitting where: '+activePlayers().map(o=>`${seatLabel(o.id)} is ${o.name}`).join(', ')+'.\n'
+    : '';
+  const convo=said.length
+    ? 'Already said at the table:\n'+said.map(s=>keepNames?`${s.name}: ${s.text}`:`${seatLabel(s.id)}: ${s.text}`).join('\n')+'\n'
+    : '';
+  const earlier=S.log.filter(l=>l.chat).slice(-3).map(l=>sanitiseLine(l.msg.replace(/^💬\s*/,''),keepNames)).join('\n');
+  const prompt=`Table talk after play.\n${state}\n${names}${events?'What just happened:\n'+events+'\n':''}${earlier?'Earlier at the table:\n'+earlier+'\n':''}${convo}Say your line now. JSON: {"say":"one short line"}`;
+  const alt=`Table talk between turns.\n${state}\nSay one short line (under 25 words) about the game. JSON: {"say":"your line"}`;
+  /* The small hosted models think out loud before they answer, so they need
+     room for the thinking as well as for the line itself. */
+  const r=await llmRaw(p,system,prompt,4000,25000,0.85);
+  const line=extractSay(r.text,p);
+  if(line)return line;
+  const r2=await llmRaw(p,system,alt,4000,20000,0.85);
+  return extractSay(r2.text,p)||cannedLine();
+}
+function renderChatPanel(said){
+  panelHTML(`<div class="panel-title">Table talk</div><div class="panel-msg">${said.map(s=>`<b>${esc(s.name)}</b>: ${esc(s.text)}`).join('<br>')}</div>`);
+}
+async function runChatTurn(){
+  const bots=S.players.filter(p=>p.type==='ai'&&!p.bankrupt);
+  if(!bots.length)return;
+  const cap=S.chatMode==='turn'?2:3;
+  const speakers=[];
+  for(let k=0;k<bots.length&&speakers.length<cap;k++)speakers.push(bots[(S.chatRotation+k)%bots.length]);
+  S.chatRotation=(S.chatRotation+speakers.length)%bots.length;
+  S.chatPending=false;
+  S.chatPhase=true;
+  $('#centerTurn').textContent='Table talk';
+  setMsg('Table talk');
+  panelHTML('<div class="panel-title">Table talk</div><div class="panel-msg">The bots are talking the game over…</div>');
+  const said=[];
+  for(const p of speakers){
+    if(!S||S.gameover)break;
+    const line=await aiChatLine(p,said);
+    if(!line)continue;
+    said.push({id:p.id,name:p.name,text:line});
+    log(`💬 ${p.name}: ${line}`,false,true);
+    renderChatPanel(said);
+    setMsg(`${p.name}: ${line}`);
+    await sleep(900);
+  }
+  S.chatPhase=false;
+  if(S&&!S.gameover)panelIdle('The table settles. Play continues.');
+}
+/* Is a chat turn due? After every turn, or once the round is complete. */
+function chatDue(){
+  if(!S||S.chatMode==='off')return false;
+  if(!S.players.some(p=>p.type==='ai'&&!p.bankrupt))return false;
+  if(S.chatMode==='turn')return true;
+  return !!S.chatPending;
+}
+/* Called when a player has finished their game turn. */
+function endTurn(){
+  S.turnJustEnded=true;
+  if(S.chatMode!=='round')return;
+  S.roundSeen++;
+  if(S.roundSeen>=S.roundSize){
+    S.roundSeen=0;
+    S.chatPending=true;
+    S.roundSize=Math.max(1,activePlayers().length);
+  }
+}
+
 function setup(){
   const saved=loadAiSettings();
   const modelOpts=AI_MODELS.map(m=>`<option value="${m.id}" ${m.id===saved.model?'selected':''}>${m.label}</option>`).join('');
+  const chatOpts=[['off','Off'],['round','After each round'],['turn','After every turn']]
+    .map(([v,l])=>`<option value="${v}" ${v===(saved.chatMode||'round')?'selected':''}>${l}</option>`).join('');
   $('#setup').innerHTML=`<h2>New game</h2><p>The classic 1935 Atlantic City board: 40 spaces, 22 streets, 4 railways, 2 utilities. Free Parking pays nothing. Income Tax is $200 or 10% of your worth. Pause any time with the button at the top right.</p>
   <div class="opts"><label>Players <select id="numPlayers"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
   <label>Human players <select id="numHumans"><option selected>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
   <label>Bot brains <select id="aiModel">${modelOpts}</select></label>
+  <label>Chat turns <select id="chatMode">${chatOpts}</select></label>
   <label>Pollinations key <input id="aiKey" type="password" placeholder="Optional — use the server key" value="${saved.key||''}" autocomplete="off"></label></div>
   <p style="font-size:11px;line-height:1.4;color:#5b6a55">Bots need a language model to think with. Leave the key blank on the Vercel build and the server's own key is used; on GitHub Pages, paste your Pollinations key so the browser can call the API directly.</p>
+  <p style="font-size:11px;line-height:1.4;color:#5b6a55">Chat turns are the second kind of turn: between the game turns the bots talk the board over, one line each, reacting to the position, what just happened and what the other bots said.</p>
   <button class="primary" id="startBtn">Start game</button>`;
   $('#startBtn').onclick=()=>{
     const n=+$('#numPlayers').value, h=Math.min(n,+$('#numHumans').value);
-    const model=$('#aiModel').value, key=$('#aiKey').value.trim();
-    saveAiSettings({model,key});
-    newGame(n,h,model,key);
+    const model=$('#aiModel').value, key=$('#aiKey').value.trim(), chatMode=$('#chatMode').value;
+    saveAiSettings({model,key,chatMode});
+    newGame(n,h,model,key,chatMode);
   };
 }
-function newGame(n,h,model,key){
+function newGame(n,h,model,key,chatMode){
   S={players:[],props:Array.from({length:40},()=>({owner:null,level:0,mortgaged:false})),current:0,log:[],gameover:false,paused:false,
      chance:shuffle([...CHANCE.keys()]),chest:shuffle([...CHEST.keys()]),
-     aiModel:model||'local',aiKey:key||'',aiProxyDead:false};
+     aiModel:model||'local',aiKey:key||'',aiProxyDead:false,
+     chatMode:chatMode||'off',chatPending:false,chatRotation:0,chatPhase:false,
+     roundSeen:0,roundSize:n,turnJustEnded:false};
   const names=['You','Mr. Monopoly','The Top Hat','The Shoe','The Car','The Dog','The Iron','The Ship'];
   for(let i=0;i<n;i++){
     const p={
@@ -675,12 +846,26 @@ function newGame(n,h,model,key){
   log('Game started — '+n+' players, '+h+' human.',true);
   if(S.aiModel==='mixed')log('Bots are thinking with a mix of models: '+AI_LLM_MODELS.map(aiModelLabel).join(', ')+'.',true);
   else if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
+  if(S.chatMode==='round')log('The table talks over each round.',true);
+  else if(S.chatMode==='turn')log('The table talks after every turn.',true);
   setMsg('Let the games begin!');
   setTimeout(playTurn,600);
 }
-function nextPlayer(){
+async function nextPlayer(){
   if(!S||S.gameover)return;
   if(S.paused){setTimeout(nextPlayer,250);return}
+  /* A chat turn sits between the game turns — the bots talk, then play on. */
+  if(S.turnJustEnded){
+    S.turnJustEnded=false;
+    if(chatDue()){
+      await runChatTurn();
+      if(!S||S.gameover)return;
+    }
+  }
+  advancePlayer();
+}
+function advancePlayer(){
+  if(!S||S.gameover)return;
   let i=S.current;
   do{i=(i+1)%S.players.length}while(S.players[i].bankrupt&&i!==S.current);
   S.current=i;renderPlayers();renderControls(`${S.players[i].name}'s turn — roll when ready`);
@@ -798,6 +983,8 @@ async function charge(p,amount,creditor,reason){
 }
 function declareBankrupt(p,creditor){
   p.bankrupt=true;p.cash=0;
+  /* A player who drops out no longer takes a turn in this round. */
+  if(S){S.roundSize=Math.max(1,S.roundSize-1);S.roundSeen=Math.min(S.roundSeen,S.roundSize)}
   p.props().forEach(i=>{
     const pr=S.props[i];
     if(creditor){pr.owner=creditor.id;creditor.cards.cc+=p.cards.cc;creditor.cards.chance+=p.cards.chance}
@@ -1140,7 +1327,7 @@ async function playTurn(){
     if(!moved||S.gameover){if(!S.gameover)nextPlayer();return}
     await land(p);
     if(S.gameover||p.bankrupt){if(!S.gameover)nextPlayer();return}
-    await manage(p);nextPlayer();return;
+    await manage(p);endTurn();nextPlayer();return;
   }
   let doubles=0;
   while(true){
@@ -1155,6 +1342,7 @@ async function playTurn(){
   if(S.gameover)return;
   if(p.bankrupt){nextPlayer();return}
   await manage(p);
+  endTurn();
   nextPlayer();
 }
 setup();
