@@ -38,29 +38,43 @@ module.exports = async function handler(req, res) {
     ];
   }
 
-  const maxTokens = Math.max(64, Math.min(Number(body.max_tokens) || 1500, MAX_TOKENS_LIMIT));
+  const maxTokens = Math.max(64, Math.min(Number(body.max_tokens) || 4000, MAX_TOKENS_LIMIT));
   const temperature = Math.max(0, Math.min(Number(body.temperature) || 0.2, 2));
-  const reasoningEffort = ['low', 'medium', 'high'].includes(body.reasoning_effort) ? body.reasoning_effort : 'low';
+  /* "none" is what keeps the small hosted models from writing a page of notes
+     before they answer. */
+  const reasoningEffort = ['none', 'low', 'medium', 'high'].includes(body.reasoning_effort) ? body.reasoning_effort : 'none';
 
-  try {
+  const upstreamBody = { model, messages, max_tokens: maxTokens, temperature, reasoning_effort: reasoningEffort };
+
+  const callUpstream = async (payload) => {
     const upstream = await fetch(POLLINATIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
-      body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature, reasoning_effort: reasoningEffort }),
+      body: JSON.stringify(payload),
     });
-    const raw = await upstream.text();
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: `Pollinations error ${upstream.status}`,
-        detail: raw.slice(0, 500),
+    return { ok: upstream.ok, status: upstream.status, raw: await upstream.text() };
+  };
+
+  try {
+    let result = await callUpstream(upstreamBody);
+    /* Not every provider knows the reasoning_effort field. If it complains
+       about that, drop it and ask again rather than failing the move. */
+    if (!result.ok && /reasoning_effort/i.test(result.raw)) {
+      const { reasoning_effort, ...withoutEffort } = upstreamBody;
+      result = await callUpstream(withoutEffort);
+    }
+    if (!result.ok) {
+      return res.status(result.status).json({
+        error: `Pollinations error ${result.status}`,
+        detail: result.raw.slice(0, 500),
       });
     }
     let data;
     try {
-      data = JSON.parse(raw);
+      data = JSON.parse(result.raw);
     } catch (err) {
       return res.status(502).json({ error: 'Pollinations returned a response we could not read' });
     }

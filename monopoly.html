@@ -313,7 +313,7 @@ function renderPlayers(){
     const n=activePlayers().filter(o=>o.props().length).length;
     return `<div class="p-row ${p.id===S.current?'active':''} ${p.bankrupt?'bankrupt':''}">
       <span class="tk">${TOKENS[p.id]}</span>
-      <span class="info"><span class="nm">${p.name}${p.type==='ai'?' <span class="cpu">(CPU'+(S.aiModel&&S.aiModel!=='local'?' · '+aiModelLabel(S.aiModel):'')+')</span>':''}</span>
+      <span class="info"><span class="nm">${p.name}${p.type==='ai'?' <span class="cpu">(CPU'+botBrainLabel(p)+')</span>':''}</span>
       <span class="meta">${posName(p.pos)}${p.jailed?' · in jail':''} · ${p.props().length} properties${p.cards.cc+p.cards.chance?' · '+JAILFREE(p)+' out':''}</span></span>
       <span class="cash">${p.bankrupt?'—':money(p.cash)}</span></div>`;
   }).join('');
@@ -341,21 +341,40 @@ function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random
 ------------------------------------------------------------------ */
 const AI_MODELS=[
   {id:'local',label:'Built-in strategy (no API)'},
+  {id:'mixed',label:'Mixed — one model per bot'},
   {id:'z-ai/glm-5.3-flash',label:'GLM 5.3 Flash'},
   {id:'deepseek/deepseek-v4.1-flash',label:'DeepSeek V4.1 Flash'},
   {id:'community/scriptsnsenses-sys/gpt-6-luna:free',label:'GPT-6 Luna (free)'}
 ];
+/* The models a bot can be assigned when the player picks "Mixed". */
+const AI_LLM_MODELS=[
+  'z-ai/glm-5.3-flash',
+  'deepseek/deepseek-v4.1-flash',
+  'community/scriptsnsenses-sys/gpt-6-luna:free'
+];
+/* One hosted provider runs a privacy filter that refuses any prompt
+   mentioning another player — even "one other player has $900". Bots running
+   on it play without sight of the opposition, and without style text that
+   talks about opponents either. */
+const NO_RIVALS_MODELS=new Set(['community/scriptsnsenses-sys/gpt-6-luna:free']);
+function rivalsAllowed(model){return !NO_RIVALS_MODELS.has(model)}
 const AI_STYLES=[
   {key:'aggressive',text:'You are an aggressive monopolist. You buy almost anything that blocks a colour set, you build aggressively, and you never pass up a bargain.'},
   {key:'cautious',text:'You are a cautious banker. You keep a fat cash reserve, you only buy when the numbers clearly work, and you build slowly.'},
   {key:'collector',text:'You are a devoted collector. You buy to complete colour sets and snap up railroads, and you hate leaving a monopoly unfinished.'},
   {key:'opportunist',text:'You are an opportunist. You pounce on cheap property, hoard cash for the right deal, and you trade when it pays.'},
-  {key:'saboteur',text:'You are a saboteur. Your first priority is to land on your opponents\' best property and block them.'}
+  {key:'saboteur',text:'You are a saboteur. Your first priority is to block the best properties on the board.'}
 ];
 const AI_SETTINGS_KEY='monopoly.ai.settings';
 function aiModelLabel(id){
   const m=AI_MODELS.find(x=>x.id===id);
   return m?m.label:'Built-in strategy';
+}/* What a given bot is thinking with, as shown next to its name. */
+function botBrainLabel(p){
+  if(!p||p.type!=='ai')return '';
+  const id=p.botModel||(S&&S.aiModel)||'local';
+  if(id==='local'||id==='mixed')return '';
+  return ' · '+aiModelLabel(id);
 }
 function loadAiSettings(){
   try{return JSON.parse(localStorage.getItem(AI_SETTINGS_KEY))||{}}catch(e){return {}}
@@ -363,9 +382,9 @@ function loadAiSettings(){
 function saveAiSettings(s){
   try{localStorage.setItem(AI_SETTINGS_KEY,JSON.stringify(s))}catch(e){}
 }
-function aiConfig(){
-  const model=S&&S.aiModel?S.aiModel:'local';
-  if(model==='local'||(S&&S.aiProxyDead))return null;
+function aiConfig(p){
+  const model=(p&&p.botModel)||(S&&S.aiModel?S.aiModel:'local');
+  if(model==='local'||model==='mixed'||(S&&S.aiProxyDead))return null;
   const key=((S&&S.aiKey)||'').trim();
   return {model,key,endpoint:key?'https://gen.pollinations.ai/v1/chat/completions':'/api/ai'};
 }
@@ -381,8 +400,8 @@ function parseJsonLoose(text){
   try{return JSON.parse(s)}catch(e){}
   try{return JSON.parse(s.replace(/,\s*([}\]])/g,'$1'))}catch(e){return null}
 }
-async function llmRaw(system,prompt,maxTokens=1500,timeoutMs=40000){
-  const cfg=aiConfig();
+async function llmRaw(p,system,prompt,maxTokens=4000,timeoutMs=40000){
+  const cfg=aiConfig(p);
   if(!cfg)return {text:'',err:'no model'};
   const headers={'Content-Type':'application/json'};
   if(cfg.key)headers.Authorization='Bearer '+cfg.key;
@@ -390,12 +409,24 @@ async function llmRaw(system,prompt,maxTokens=1500,timeoutMs=40000){
   const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
   let status=0;
   try{
-    const body={model:cfg.model,messages:[{role:'system',content:system},{role:'user',content:prompt}],max_tokens:maxTokens,temperature:0.2,reasoning_effort:'low'};
-    const res=await fetch(cfg.endpoint,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal});
+    const messages=[{role:'system',content:system},{role:'user',content:prompt}];
+    /* Asking for no visible reasoning is what keeps the small hosted models
+       from writing a page of notes before they answer. */
+    const body={model:cfg.model,messages,max_tokens:maxTokens,temperature:0.2,reasoning_effort:'none'};
+    let res=await fetch(cfg.endpoint,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal});
     status=res.status;
     if(!res.ok){
       const detail=await res.text().catch(()=>'');
-      if(/content_blocked|safety filter/i.test(detail))throw new Error('the provider refused this prompt');
+      if(/reasoning_effort/i.test(detail)){
+        /* the provider does not know that field — ask again without it */
+        delete body.reasoning_effort;
+        res=await fetch(cfg.endpoint,{method:'POST',headers,body:JSON.stringify(body),signal:ctrl.signal});
+        status=res.status;
+      }
+    }
+    if(!res.ok){
+      const detail=await res.text().catch(()=>'');
+      if(/content_blocked|safety filter|refused/i.test(detail))throw new Error('the provider refused this prompt');
       throw new Error('HTTP '+res.status);
     }
     const data=await res.json();
@@ -406,6 +437,7 @@ async function llmRaw(system,prompt,maxTokens=1500,timeoutMs=40000){
     const why=aborted?'timed out':(err&&err.message)||'failed';
     if(!cfg.key&&status===404){
       S.aiProxyDead=true;S.aiModel='local';
+      if(S.players)S.players.forEach(pl=>{if(pl.type==='ai')pl.botModel='local'});
       log('This deployment has no AI proxy — bots are using the built-in strategy. Paste a Pollinations key in "New game" to switch them to a language model.');
       return {text:'',err:'no proxy'};
     }
@@ -414,7 +446,11 @@ async function llmRaw(system,prompt,maxTokens=1500,timeoutMs=40000){
 }
 function cleanWhy(s){
   if(typeof s!=='string')return '';
-  return s.replace(/\s+/g,' ').trim().slice(0,110);
+  const t=s.replace(/\s+/g,' ').trim();
+  if(t.length<=110)return t;
+  const cut=t.slice(0,110);
+  const at=cut.lastIndexOf(' ');
+  return (at>60?cut.slice(0,at):cut)+'…';
 }
 /* Some models answer in plain prose instead of JSON. Read the closing lines of
    the answer and pick the decision out of them. */
@@ -478,75 +514,170 @@ function proseDecision(text,kind){
     let amounts=scan(tail.slice(-2).join(' '));
     if(!amounts.length)amounts=scan(body);
     if(!amounts.length)return null;
-    return {maxBid:amounts[amounts.length-1],why,text:body};
+    // the reason is the closing line that actually explains the number
+    const reasons=tail.filter(s=>/[a-z]/i.test(s)&&!scan(s).length);
+    const best=(reasons.length?reasons:tail).slice().sort((a,b)=>b.length-a.length)[0]||'';
+    return {maxBid:amounts[amounts.length-1],why:cleanWhy(best),text:body};
   }
   return null;
 }
-async function llmDecision(kind,system,prompt,alt,maxTokens=1500){
-  let r=await llmRaw(system,prompt,maxTokens,40000);
-  let text=r.text;
-  if(!text&&alt){
+async function llmDecision(p,kind,system,prompt,alt,maxTokens=4000){
+  /* Pull the decision out of a reply: JSON if the model gave us any, and the
+     closing sentences if it answered in prose instead. */
+  const read=(t)=>{
+    if(!t)return null;
+    let o=parseJsonLoose(t);
+    if(!o||typeof o!=='object')o=proseDecision(t,kind);
+    return (o&&typeof o==='object')?o:null;
+  };
+  let r=await llmRaw(p,system,prompt,maxTokens,40000);
+  let text=r.text,err=r.err;
+  let obj=read(text);
+  /* A model that thinks out loud can spend the whole answer on its own
+     reasoning and never reach the decision, and some hosts refuse the full
+     prompt outright. Either way, ask again with the plain version. */
+  if(!obj&&alt){
     await sleep(600);
-    const r2=await llmRaw(alt.system,alt.prompt,maxTokens,25000);
-    text=r2.text;
-    r=r2;
+    const r2=await llmRaw(p,alt.system,alt.prompt,maxTokens,25000);
+    const obj2=read(r2.text);
+    if(obj2){obj=obj2;text=r2.text;err=r2.err;}
+    else if(!text){text=r2.text;err=r2.err;}
   }
-  if(!text){
-    log(`AI unavailable (${r.err||'failed'}) — using the built-in strategy.`);
+  if(!obj){
+    if(!text)log(`AI unavailable (${err||'failed'}) — using the built-in strategy.`);
+    else log('AI gave an unusable answer — using the built-in strategy.');
     return null;
   }
-  let obj=parseJsonLoose(text);
-  if(!obj||typeof obj!=='object')obj=proseDecision(text,kind);
-  if(!obj||typeof obj!=='object')return null;
+  const whyOf=()=>cleanWhy(obj.why||obj.reason||obj.explanation||obj.rationale||obj.note||'');
   if(kind==='buy'){
-    if(typeof obj.buy!=='boolean')return null;
-    return {buy:obj.buy,why:cleanWhy(obj.why||obj.reason||obj.explanation||''),text};
+    let buy=obj.buy;
+    if(typeof buy!=='boolean'&&typeof obj.purchase==='boolean')buy=obj.purchase;
+    if(typeof buy!=='boolean'){
+      const v=String(obj.decision||obj.action||obj.choice||obj.answer||'').toLowerCase().trim();
+      if(['buy','purchase','acquire','yes','take it','take the property'].includes(v))buy=true;
+      else if(['decline','pass','skip','no','reject','let it go','auction'].includes(v))buy=false;
+    }
+    if(typeof buy!=='boolean')return null;
+    return {buy,why:whyOf(),text};
   }
   if(kind==='build'){
-    const build=obj.build===true||obj.build==='true';
-    const skip=obj.build===false||obj.build==='false';
-    if(!build&&!skip)return null;
-    return {build,property:String(obj.property||obj.name||obj.target||'').trim(),why:cleanWhy(obj.why||obj.reason||''),text};
+    let build=obj.build;
+    if(build==='true')build=true;
+    if(build==='false')build=false;
+    if(typeof build!=='boolean'){
+      const v=String(obj.decision||obj.action||obj.choice||'').toLowerCase().trim();
+      if(['build','yes','construct','develop','put up a house'].includes(v))build=true;
+      else if(['skip','no','wait','hold','save','do not build',"don't build"].includes(v))build=false;
+    }
+    if(typeof build!=='boolean')return null;
+    return {build,property:String(obj.property||obj.target||obj.name||obj.boardNumber||obj.board_number||obj.number||'').trim(),why:whyOf(),text};
   }
   if(kind==='jail'){
-    const a=String(obj.action||obj.choice||'').toLowerCase().trim();
+    const a=String(obj.action||obj.choice||obj.decision||'').toLowerCase().trim();
     if(!['card','pay','roll'].includes(a))return null;
     return {action:a,why:cleanWhy(obj.why||obj.reason||''),text};
   }
   if(kind==='bid'){
-    const n=Number(obj.maxBid!==undefined?obj.maxBid:obj.bid);
+    const raw=obj.maxBid!==undefined?obj.maxBid:(obj.bid!==undefined?obj.bid:(obj.amount!==undefined?obj.amount:obj.price));
+    const n=Number(raw);
     if(!Number.isFinite(n))return null;
-    return {maxBid:Math.max(0,Math.floor(n)),why:cleanWhy(obj.why||obj.reason||''),text};
+    return {maxBid:Math.max(0,Math.floor(n)),why:whyOf(),text};
   }
   return null;
 }
 /* Opponents are described by seat letter rather than by their token names:
    some hosted models refuse prompts that name the other players. */
-function seatLabel(i){return 'Player '+String.fromCharCode(65+i)}function aiStateSummary(p){
-  const mine=p.props().map(i=>`${T[i].name}${S.props[i].level?` (${S.props[i].level===5?'hotel':S.props[i].level+' house'+(S.props[i].level>1?'s':'')})`:''}${S.props[i].mortgaged?' [mortgaged]':''}`);
-  const rivals=activePlayers().filter(o=>o!==p).map(o=>`${seatLabel(o.id)} (${money(o.cash)}) owns ${o.props().map(i=>T[i].short.replace('\n',' ')).join(', ')||'nothing'}`);
-  return [
-    `Your cash: ${money(p.cash)}`,
-    `You are standing on ${T[p.pos].name}.`,
-    `Your properties (${mine.length}): ${mine.join('; ')||'none'}`,
-    `Other players:\n${rivals.map(r=>' - '+r).join('\n')}`
-  ].join('\n');
+function seatLabel(i){return 'Player '+String.fromCharCode(65+i)}
+/* The board spaces are named after real streets, and some hosted models run a
+   privacy filter that refuses any prompt containing one of those names.
+   Bots are therefore told which colour group a property belongs to and its
+   board number instead — the same information, minus the street names. */
+const GROUP_LABEL={brown:'brown',lightblue:'light blue',pink:'pink',orange:'orange',red:'red',yellow:'yellow',green:'green',blue:'dark blue'};
+function groupLabel(g){return GROUP_LABEL[g]||g||'other'}
+/* How a property is described to a bot. */
+function propTag(i){return '#'+i}
+function propLabel(i){
+  const t=T[i];
+  if(!t)return 'a board space';
+  if(t.type==='prop')return propTag(i)+' ('+groupLabel(t.group)+' group)';
+  if(t.type==='rail')return 'a railroad';
+  if(t.type==='util')return 'a utility';
+  if(t.type==='go')return 'the start';
+  return 'a board space';
 }
+/* Find which property the bot meant: the board number it quoted, the colour
+   group it named, or — if it echoed the street name anyway — the name itself. */
+function matchProp(answer,options){
+  const s=String(answer||'').trim();
+  if(!s||!options.length)return null;
+  const low=s.toLowerCase();
+  const tagged=low.match(/#\s*(\d{1,2})/);
+  if(tagged&&options.includes(Number(tagged[1])))return Number(tagged[1]);
+  const bare=s.replace('#','').trim();
+  if(/^\d{1,2}$/.test(bare)&&options.includes(Number(bare)))return Number(bare);
+  const byGroup=options.filter(i=>low.includes(groupLabel(T[i].group)));
+  if(byGroup.length===1)return byGroup[0];
+  const byName=options.find(i=>low.includes(T[i].name.toLowerCase()));
+  if(byName!==undefined)return byName;
+  return null;
+}
+/* `rivals` is off for decisions that do not depend on the other players —
+   a shorter prompt answers faster and dodges the models that refuse to be
+   asked about named opponents. */
+/* Owned spaces, grouped by colour. A bot cares far more about "I own the
+   orange group" than about the board number of each one — and a short board
+   is answered far faster by the smaller models. */
+function ownSummary(p){
+  const groups={};
+  p.props().forEach(i=>{
+    const g=T[i].group||'other';
+    (groups[g]=groups[g]||[]).push(i);
+  });
+  const keys=Object.keys(groups);
+  if(!keys.length)return 'nothing';
+  return keys.map(g=>{
+    const built=groups[g].filter(i=>S.props[i].level>0).length;
+    return groupLabel(g)+' group ×'+groups[g].length+(built?' ('+built+' built)':'');
+  }).join(', ');
+}
+function rivalSummary(p){
+  return activePlayers().filter(o=>o!==p).map(o=>{
+    const groups=[...new Set(o.props().map(i=>T[i].group))].map(groupLabel);
+    return seatLabel(o.id)+' '+money(o.cash)+(groups.length?' ('+groups.join(', ')+')':'');
+  }).join('; ');
+}
+function aiStateSummary(p,withRivals=true){
+  const lines=[
+    `Cash: ${money(p.cash)}`,
+    `You own: ${ownSummary(p)}`,
+    `You are on: ${propLabel(p.pos)}`
+  ];
+  if(withRivals&&rivalsAllowed(p.botModel||(S&&S.aiModel))){
+    const r=rivalSummary(p);
+    if(r)lines.push(`Rivals: ${r}`);
+  }
+  return lines.join('\n');
+}
+/* The smaller hosted models answer fastest when the question carries the
+   shape of the answer and the system prompt stays out of the way. */
+function aiSystem(p){return `${p.aiStyle.text}\nYou are a Monopoly bot. Output only a JSON object. No explanation.`}
+const WHY_FIELD='"why":"ten words or fewer"';
 function thinking(p){
   setMsg(`${p.name} is thinking…`);
-  panelHTML(`<div class="panel-title thinking">${p.name} is thinking…</div><div class="panel-msg">${aiModelLabel(S.aiModel)} is reading the board. This can take a few seconds.</div>`);
+  panelHTML(`<div class="panel-title thinking">${p.name} is thinking…</div><div class="panel-msg">${aiModelLabel(p.botModel||S.aiModel)} is reading the board. This can take a few seconds.</div>`);
 }
 function thinkingDone(){panelIdle('Resolving the move…')}
 async function aiBuyDecision(p,i,localBuy){
   const t=T[i],price=t.price;
-  if(!aiConfig())return {buy:localBuy(),why:''};
+  if(!aiConfig(p))return {buy:localBuy(),why:''};
   thinking(p);
-  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"buy":true or false,"why":"ten words or fewer"}.`;
+  const system=aiSystem(p);
   const d=await llmDecision(
+    p,
     'buy',
     system,
-    `You have landed on ${t.name}, which is unowned and costs ${money(price)}.\n${aiStateSummary(p)}\nBuy it for ${money(price)}, or decline and let it go to auction?`,
-    {system,prompt:`A board space is unowned and costs ${money(price)}. You have ${money(p.cash)}.\nShould you buy it? Reply with JSON only: {"buy":true or false,"why":"ten words or fewer"}.`}
+    `Unowned: ${propLabel(i)} — ${money(price)}.\n${aiStateSummary(p)}\nBuy it for ${money(price)}, or decline and let it go to auction?\nJSON: {"buy":true or false,${WHY_FIELD}}`,
+    {system,prompt:`Unowned ${propLabel(i)}, price ${money(price)}. You have ${money(p.cash)}.\nBuy it? JSON: {"buy":true or false,${WHY_FIELD}}`}
   );
   thinkingDone();
   if(!d||typeof d.buy!=='boolean')return {buy:localBuy(),why:''};
@@ -558,26 +689,25 @@ function aiSay(p,why){
 async function aiBuildDecision(p){
   const options=p.props().filter(i=>canBuild(p,i)&&p.cash>=T[i].house);
   if(!options.length)return null;
-  if(!aiConfig())return null;
+  if(!aiConfig(p))return null;
   thinking(p);
-  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"build":true or false,"property":"exact property name","why":"ten words or fewer"}.`;
-  const canList=options.map(i=>`${T[i].name} (a house costs ${money(T[i].house)}, rent becomes ${money(T[i].rents[1])})`).join('; ');
+  const system=aiSystem(p);
+  const canList=options.map(i=>`${propLabel(i)} (house ${money(T[i].house)} → rent ${money(T[i].rents[1])})`).join('; ');
   const d=await llmDecision(
+    p,
     'build',
     system,
-    `Your turn is ending and you may build houses on the properties you own.\n${aiStateSummary(p)}\nYou can build on: ${canList}.\nShould you build this turn?`,
-    {system,prompt:`Your turn is ending. You can build on: ${canList}.\nShould you build this turn? Reply with JSON only: {"build":true or false,"property":"exact property name","why":"ten words or fewer"}.`}
+    `Your turn is ending.\nYou can build on: ${canList}.\n${aiStateSummary(p,false)}\nBuild now?\nJSON: {"build":true or false,"property":"the board number of the property",${WHY_FIELD}}`,
+    {system,prompt:`Your turn is ending. You can build on: ${canList}.\nBuild now? JSON: {"build":true or false,"property":"the board number of the property",${WHY_FIELD}}`}
   );
   thinkingDone();
   if(!d)return null;
   if(d.build!==true)return {action:'skip',why:String(d.why||'').trim().slice(0,110)};
-  let pick=options.find(i=>T[i].name===String(d.property||'').trim());
-  if(!pick&&d.text){
-    // a prose answer names the property somewhere in the sentence
-    const low=String(d.text).toLowerCase();
-    pick=options.find(i=>low.includes(T[i].name.toLowerCase()));
-  }
-  if(!pick)return null;
+  let pick=matchProp(d.property,options);
+  if(pick===null&&d.text)pick=matchProp(d.text,options);
+  /* Only one property can be built on, so the choice is made for it. */
+  if(pick===null&&options.length===1)pick=options[0];
+  if(pick===null)return null;
   return {action:'build',index:pick,why:String(d.why||'').trim().slice(0,110)};
 }
 async function aiJailDecision(p){
@@ -586,14 +716,15 @@ async function aiJailDecision(p){
     const pay=!useCard&&(p.jailTurns>=2||p.cash>200);
     return {action:useCard?'card':pay?'pay':'roll'};
   };
-  if(!aiConfig())return local();
+  if(!aiConfig(p))return local();
   thinking(p);
-  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"action":"card" or "pay" or "roll","why":"ten words or fewer"}.`;
+  const system=aiSystem(p);
   const d=await llmDecision(
+    p,
     'jail',
     system,
-    `You are in jail (attempt ${p.jailTurns+1} of 3). ${aiStateSummary(p)}\nGet Out of Jail Free cards held: ${p.cards.cc+p.cards.chance}. Paying $50 releases you immediately; rolling for doubles is free but you stay in jail if the dice are not doubles.\nChoose "card", "pay" or "roll".`,
-    {system,prompt:`You are in jail (attempt ${p.jailTurns+1} of 3). You hold ${p.cards.cc+p.cards.chance} Get Out of Jail Free cards and have ${money(p.cash)}.\nPaying $50 releases you at once; rolling for doubles is free but you stay in jail if the dice are not doubles.\nChoose "card", "pay" or "roll". Reply with JSON only: {"action":"card" or "pay" or "roll","why":"ten words or fewer"}.`}
+    `You are in jail (attempt ${p.jailTurns+1} of 3).\n${aiStateSummary(p,false)}\nCards held: ${p.cards.cc+p.cards.chance}. Pay $50 to leave now, or roll for doubles (free, but you stay in jail without doubles).\nChoose "card", "pay" or "roll".\nJSON: {"action":"card" or "pay" or "roll",${WHY_FIELD}}`,
+    {system,prompt:`You are in jail (attempt ${p.jailTurns+1} of 3). Cards held: ${p.cards.cc+p.cards.chance}. Cash: ${money(p.cash)}.\nPay $50 to leave now, or roll for doubles (free, but you stay in jail without doubles).\nChoose "card", "pay" or "roll". JSON: {"action":"card" or "pay" or "roll",${WHY_FIELD}}`}
   );
   thinkingDone();
   const action=d&&['card','pay','roll'].includes(String(d.action))?String(d.action):null;
@@ -602,17 +733,18 @@ async function aiJailDecision(p){
   if(action==='pay'&&p.cash<50)return local();
   return {action,why:String(d.why||'').trim().slice(0,110)};
 }
-async function aiBidCap(p,t,key){
-  if(!aiConfig())return null;
+async function aiBidCap(p,t,i,key){
+  if(!aiConfig(p))return null;
   if(!S.bidCaps)S.bidCaps={};
   if(S.bidCaps[key]!==undefined)return S.bidCaps[key];
   thinking(p);
-  const system=`${p.aiStyle.text}\nYou are playing Monopoly. Reply with JSON only: {"maxBid":number,"why":"ten words or fewer"}.`;
+  const system=aiSystem(p);
   const d=await llmDecision(
+    p,
     'bid',
     system,
-    `${t.name} has gone to auction. ${aiStateSummary(p)}\nWhat is the most you would pay for it? It is worth about ${money(t.price)}.\nAnswer with a number of dollars.`,
-    {system,prompt:`A board space is being auctioned and is worth about ${money(t.price)}. You have ${money(p.cash)}.\nWhat is the most you would pay for it? Answer with JSON only: {"maxBid":number,"why":"ten words or fewer"}.`}
+    `Auction: ${propLabel(i)}, worth about ${money(t.price)}.\n${aiStateSummary(p)}\nMax bid in dollars?\nJSON: {"maxBid":number,${WHY_FIELD}}`,
+    {system,prompt:`${propLabel(i)} is being auctioned, worth about ${money(t.price)}. You have ${money(p.cash)}.\nMax bid in dollars? JSON: {"maxBid":number,${WHY_FIELD}}`}
   );
   thinkingDone();
   const n=d&&Number(d.maxBid);
@@ -648,6 +780,7 @@ function newGame(n,h,model,key){
       id:i,name:i<h?`Player ${i+1}`:names[i%names.length],type:i<h?'human':'ai',token:TOKENS[i],
       cash:1500,pos:0,jailed:false,jailTurns:0,cards:{cc:0,chance:0},bankrupt:false,
       aiStyle:AI_STYLES[(i-h)%AI_STYLES.length],
+      botModel:model==='mixed'?AI_LLM_MODELS[(i-h)%AI_LLM_MODELS.length]:(model&&model!=='local'?model:null),
       props(){return Object.keys(S.props).map(Number).filter(k=>S.props[k].owner===this.id)}
     };
     S.players.push(p);
@@ -658,7 +791,8 @@ function newGame(n,h,model,key){
   $('#pauseBtn').style.display='inline-block';
   initPause();
   log('Game started — '+n+' players, '+h+' human.',true);
-  if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
+  if(S.aiModel==='mixed')log('Bots are thinking with a mix of models: '+AI_LLM_MODELS.map(aiModelLabel).join(', ')+'.',true);
+  else if(S.aiModel!=='local')log('Bots are thinking with '+aiModelLabel(S.aiModel)+'.',true);
   setMsg('Let the games begin!');
   setTimeout(playTurn,600);
 }
@@ -835,7 +969,7 @@ async function auction(starter,i){
         {label:`Bid ${money(min)}`,value:min,cls:'primary',disabled:min>p.cash},{label:'Pass',value:0}]});
       else {
         const localCap=Math.min(p.cash,Math.floor(t.price*(t.group?1.25:1.1)));
-        const llmCap=await aiBidCap(p,t,`${p.id}:${i}`);
+        const llmCap=await aiBidCap(p,t,i,`${p.id}:${i}`);
         const cap=llmCap===null?localCap:Math.min(llmCap,p.cash,Math.floor(t.price*2));
         bid=min<=cap&&Math.random()<.75?min:0;
       }
@@ -1001,7 +1135,7 @@ function canBuild(p,i){
   return pr.level<=min;
 }
 async function aiBuild(p){
-  if(aiConfig()){
+  if(aiConfig(p)){
     const d=await aiBuildDecision(p);
     if(d&&d.action==='build'){
       const i=d.index,pr=S.props[i],cost=T[i].house;
