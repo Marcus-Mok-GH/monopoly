@@ -30,6 +30,7 @@ project name must be lowercase.
 - `aiConfig(p)` resolves the model per bot from `p.botModel`; `botBrainLabel(p)` shows it in the player list.
 - Some hosted providers refuse prompts that name another player or use the board's street names. Those models get board numbers and colour groups instead of street names, and no opponent information at all — see `NO_RIVALS_MODELS` and `rivalsAllowed()`.
 - `llmDecision()` accepts JSON or prose, and retries with a blander prompt when the first answer is unusable.
+- There are no predefined play styles or personalities. `AI_STYLES` is gone: the decision prompt in `aiSystem()` only tells the bot it is playing to win and to judge the position itself, and the chat prompt in `aiChatLine()` gives it only its own name (or seat letter for `NO_RIVALS_MODELS`). Bots may still differ — that is the models' own judgement, not a preset.
 
 ## Chat turns
 - The game plays two kinds of turn: the game turn (roll, move, buy, build) and the chat turn, where the bots talk the board over.

@@ -369,17 +369,9 @@ const AI_LLM_MODELS=[
 ];
 /* One hosted provider runs a privacy filter that refuses any prompt
    mentioning another player — even "one other player has $900". Bots running
-   on it play without sight of the opposition, and without style text that
-   talks about opponents either. */
+   on it play without sight of the opposition. */
 const NO_RIVALS_MODELS=new Set(['community/scriptsnsenses-sys/gpt-6-luna:free']);
 function rivalsAllowed(model){return !NO_RIVALS_MODELS.has(model)}
-const AI_STYLES=[
-  {key:'aggressive',text:'You are an aggressive monopolist. You buy almost anything that blocks a colour set, you build aggressively, and you never pass up a bargain.'},
-  {key:'cautious',text:'You are a cautious banker. You keep a fat cash reserve, you only buy when the numbers clearly work, and you build slowly.'},
-  {key:'collector',text:'You are a devoted collector. You buy to complete colour sets and snap up railroads, and you hate leaving a monopoly unfinished.'},
-  {key:'opportunist',text:'You are an opportunist. You pounce on cheap property, hoard cash for the right deal, and you trade when it pays.'},
-  {key:'saboteur',text:'You are a saboteur. Your first priority is to block the best properties on the board.'}
-];
 const AI_SETTINGS_KEY='monopoly.ai.settings';
 function aiModelLabel(id){
   const m=AI_MODELS.find(x=>x.id===id);
@@ -675,7 +667,7 @@ function aiStateSummary(p,withRivals=true){
 }
 /* The smaller hosted models answer fastest when the question carries the
    shape of the answer and the system prompt stays out of the way. */
-function aiSystem(p){return `${p.aiStyle.text}\nYou are a Monopoly bot. Output only a JSON object. No explanation.`}
+function aiSystem(p){return `You are a Monopoly bot. Play to win: judge the position yourself and make the move that best serves your own chances of winning this game. Output only a JSON object. No explanation.`}
 const WHY_FIELD='"why":"ten words or fewer"';
 function thinking(p){
   setMsg(`${p.name} is thinking…`);
@@ -858,7 +850,10 @@ async function aiChatLine(p,said,opts){
   opts=opts||{};
   if(!aiConfig(p))return cannedLine();
   const keepNames=rivalsAllowed(p.botModel||(S&&S.aiModel)||'local');
-  const system=`${p.aiStyle.text}\nYou are one of the Monopoly players sitting at a table with the others. Say ONE line of table talk (under 25 words) about the game as it stands, in your style. React to what just happened. Reply with JSON only: {"say":"your line"}`;
+  /* The privacy-filter models are not told anybody's name, so the speaker
+     identifies itself by seat letter instead. */
+  const who=keepNames?p.name:seatLabel(p.id);
+  const system=`You are ${who}, one of the Monopoly players sitting at a table with the others. Say ONE line of table talk (under 25 words) about the game as it stands. React to what just happened. Reply with JSON only: {"say":"your line"}`;
   const state=aiStateSummary(p,keepNames);
   const events=gameEvents(keepNames);
   /* The seat letters the state block uses are spelled out for the models
@@ -1010,7 +1005,6 @@ function newGame(n,h,model,key,chatMode){
     const p={
       id:i,name:i<h?`Player ${i+1}`:names[i%names.length],type:i<h?'human':'ai',token:TOKENS[i],
       cash:1500,pos:0,jailed:false,jailTurns:0,cards:{cc:0,chance:0},bankrupt:false,
-      aiStyle:AI_STYLES[(i-h)%AI_STYLES.length],
       botModel:model==='mixed'?AI_LLM_MODELS[(i-h)%AI_LLM_MODELS.length]:(model&&model!=='local'?model:null),
       props(){return Object.keys(S.props).map(Number).filter(k=>S.props[k].owner===this.id)}
     };
