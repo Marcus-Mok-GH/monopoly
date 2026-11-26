@@ -9,10 +9,24 @@ Live on Vercel: https://monopoly-dun.vercel.app
 
 - `monopoly.html` — self-contained game (HTML, CSS and JavaScript in one file)
 - `index.html` + `game.js` — the same game split into source files; `index.html` is what GitHub Pages serves
+- `api/ai.js` — Vercel serverless proxy for Pollinations chat completions (keeps the API key off the client)
+- `build.py` — regenerates `monopoly.html` from `index.html` + `game.js`; run it after editing either
 
 ## Play
 
 Choose 2–8 players and how many are human, then roll, buy, build and trade. The computer opponent takes its turn automatically. An in-game "Classic rules" button explains the rules.
+
+## AI opponents
+
+Bots can think with a language model instead of the built-in heuristic. Pick a brain under "Bot brains" on the New game screen:
+
+- **Built-in strategy (no API)** — the classic heuristic, no network calls
+- **Mixed — one model per bot** — each bot gets a different model, so the table plays in different styles
+- **GLM 5.3 Flash**, **DeepSeek V4.1 Flash**, **GPT-6 Luna (free)** — every bot uses that model
+
+On the Vercel build the server's own Pollinations key is used (`POLLINATIONS_API_KEY`, a Vercel env var). On GitHub Pages there is no server, so paste your own Pollinations key into the setup screen and the browser calls the API directly.
+
+Two hosted providers run privacy filters that refuse prompts naming another player, and one provider also refuses the street names on the board. Bots on those models are therefore told board numbers and colour groups instead, and are not told who their opponents are.
 
 ## Rules implemented
 
